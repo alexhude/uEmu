@@ -46,7 +46,7 @@ Supports following architectures out of the box: **x86**, **x64**, **ARM**, **AR
 
 ### Start
 
-When emulation is started, it is necessary to provide initial CPU context (see _Update CPU Context_)
+Start emulation from cursor. It is necessary to provide initial CPU context first (see _Update CPU Context_)
 After that all segments from IDA database will be mapped to emulator (initialized data will be copied as well).
 
 ### Run
@@ -124,8 +124,8 @@ Every time emulation stops, changed memory blocks will be highlighted.
 
 ### Update CPU Context
 
-Register Values can be changes individually or all at once with JSON file via popup menu.
-Current context can also be saved in JSON fine for future use.
+Register Values can be changed individually or all at once with JSON file via popup menu.
+Current context can also be saved in JSON file for future use.
 
 ![](./Resources/screenshots/doc_changectx.png)
 
@@ -139,7 +139,7 @@ Apart from all the functions listed in Popup Menu, there are couple of new comma
 
 #### Show Mapped Memory
 
-Display all mapped regions. Use popup menu to display memory for particular region.
+Display all mapped regions. Use popup menu to display memory for particular region or dump it to a file.
 
 ![](./Resources/screenshots/doc_mappedmem.png)
 

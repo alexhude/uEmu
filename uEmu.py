@@ -434,11 +434,22 @@ class MappedMemoryView(Choose2):
         self.items = memory
         self.icon = -1
         self.selcount = 0
-        self.popup_names = [ "", "", "Show", "" ]
+        self.popup_names = [ "", "Dump To File", "Show", "" ]
         self.owner = owner
 
     def OnClose(self):
         pass
+
+    def OnDeleteLine(self, n): # Save JSON
+        filePath = AskFile(1, "*.bin", "Dump memory")
+        if filePath is not None:
+            with open(filePath, 'w') as outfile:
+                address = self.items[n][0]
+                size = self.items[n][1] - self.items[n][0] + 1
+                outfile.seek(0, 0)
+                outfile.write(self.owner.unicornEngine.get_mapped_bytes(address, size))
+                outfile.close()
+        return n
 
     def OnEditLine(self, n):
         address = self.items[n][0]
@@ -782,6 +793,9 @@ class UnicornEngine(object):
 
     def get_mapped_memory(self):
         return [ [ memStart, memEnd, memPerm ] for (memStart, memEnd, memPerm) in self.mu.mem_regions() ]
+
+    def get_mapped_bytes(self, address, size):
+        return self.mu.mem_read(address, size)
 
     def hook_mem_access(self, uc, access, address, size, value, user_data):
         if self.is_breakpoint_reached(address):
