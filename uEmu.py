@@ -23,6 +23,7 @@ from PyQt5.QtWidgets import (QPushButton, QHBoxLayout)
 from unicorn import *
 from unicorn.arm_const import *
 from unicorn.arm64_const import *
+from unicorn.mips_const import *
 from unicorn.x86_const import *
 
 PLUGIN_NAME         = "uEmu"
@@ -53,14 +54,26 @@ def get_arch():
             return "armbe"
         else:
             return "armle"
+    elif ph.id == PLFM_MIPS and ph.flag & PR_USE64:
+        if cvar.inf.mf:
+            return "mips64be"
+        else:
+            return "mips64le"
+    elif ph.id == PLFM_MIPS and ph.flag & PR_USE32:
+        if cvar.inf.mf:
+            return "mipsbe"
+        else:
+            return "mipsle"
     else:
         return ""
 
 def get_register_map(arch):
-    if arch == "arm64le" or arch == "arm64be":
+    if arch.startswith("arm64"):
         arch = "arm64"
-    elif arch == "armle" or arch == "armbe":
+    elif arch.startswith("arm"):
         arch = "arm"
+    elif arch.startswith("mips"):
+        arch = "mips"
 
     registers = {
         "x64" : [
@@ -149,6 +162,41 @@ def get_register_map(arch):
             [ "FP",     UC_ARM64_REG_FP  ],
             [ "LR",     UC_ARM64_REG_LR  ],
             [ "NZCV",   UC_ARM64_REG_NZCV ]
+        ],
+        "mips" : [
+            [ "zero",   UC_MIPS_REG_0   ],
+            [ "at",     UC_MIPS_REG_1   ],
+            [ "v0",     UC_MIPS_REG_2   ],
+            [ "v1",     UC_MIPS_REG_3   ],
+            [ "a0",     UC_MIPS_REG_4   ],
+            [ "a1",     UC_MIPS_REG_5   ],
+            [ "a2",     UC_MIPS_REG_6   ],
+            [ "a3",     UC_MIPS_REG_7   ],
+            [ "t0",     UC_MIPS_REG_8   ],
+            [ "t1",     UC_MIPS_REG_9   ],
+            [ "t2",     UC_MIPS_REG_10  ],
+            [ "t3",     UC_MIPS_REG_11  ],
+            [ "t4",     UC_MIPS_REG_12  ],
+            [ "t5",     UC_MIPS_REG_13  ],
+            [ "t6",     UC_MIPS_REG_14  ],
+            [ "t7",     UC_MIPS_REG_15  ],
+            [ "s0",     UC_MIPS_REG_16  ],
+            [ "s1",     UC_MIPS_REG_17  ],
+            [ "s2",     UC_MIPS_REG_18  ],
+            [ "s3",     UC_MIPS_REG_19  ],
+            [ "s4",     UC_MIPS_REG_20  ],
+            [ "s5",     UC_MIPS_REG_21  ],
+            [ "s6",     UC_MIPS_REG_22  ],
+            [ "s7",     UC_MIPS_REG_23  ],
+            [ "t8",     UC_MIPS_REG_24  ],
+            [ "t9",     UC_MIPS_REG_25  ],
+            [ "k0",     UC_MIPS_REG_26  ],
+            [ "k1",     UC_MIPS_REG_27  ],
+            [ "gp",     UC_MIPS_REG_28  ],
+            [ "sp",     UC_MIPS_REG_29  ],
+            [ "fp",     UC_MIPS_REG_30  ],
+            [ "ra",     UC_MIPS_REG_31  ],
+            [ "pc",     UC_MIPS_REG_PC  ],
         ]
     }
     return registers[arch]  
@@ -615,12 +663,16 @@ class UnicornEngine(object):
         self.owner = owner
 
         uc_setup = {
-            "x64"       : [ UC_X86_REG_RIP,     UC_ARCH_X86,    UC_MODE_64 ],
-            "x86"       : [ UC_X86_REG_EIP,     UC_ARCH_X86,    UC_MODE_32 ],
-            "arm64be"   : [ UC_ARM64_REG_PC,    UC_ARCH_ARM64,  UC_MODE_ARM | UC_MODE_BIG_ENDIAN ],
-            "arm64le"   : [ UC_ARM64_REG_PC,    UC_ARCH_ARM64,  UC_MODE_ARM | UC_MODE_LITTLE_ENDIAN ],
-            "armbe"     : [ UC_ARM_REG_PC,      UC_ARCH_ARM,    UC_MODE_ARM | UC_MODE_BIG_ENDIAN ],
-            "armle"     : [ UC_ARM_REG_PC,      UC_ARCH_ARM,    UC_MODE_ARM | UC_MODE_LITTLE_ENDIAN ],
+            "x64"       : [ UC_X86_REG_RIP,     UC_ARCH_X86,    UC_MODE_64                              ],
+            "x86"       : [ UC_X86_REG_EIP,     UC_ARCH_X86,    UC_MODE_32                              ],
+            "arm64be"   : [ UC_ARM64_REG_PC,    UC_ARCH_ARM64,  UC_MODE_ARM     | UC_MODE_BIG_ENDIAN    ],
+            "arm64le"   : [ UC_ARM64_REG_PC,    UC_ARCH_ARM64,  UC_MODE_ARM     | UC_MODE_LITTLE_ENDIAN ],
+            "armbe"     : [ UC_ARM_REG_PC,      UC_ARCH_ARM,    UC_MODE_ARM     | UC_MODE_BIG_ENDIAN    ],
+            "armle"     : [ UC_ARM_REG_PC,      UC_ARCH_ARM,    UC_MODE_ARM     | UC_MODE_LITTLE_ENDIAN ],
+            "mips64be"  : [ UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS64  | UC_MODE_BIG_ENDIAN    ],
+            "mips64le"  : [ UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS64  | UC_MODE_LITTLE_ENDIAN ],
+            "mipsbe"    : [ UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS32  | UC_MODE_BIG_ENDIAN    ],
+            "mipsle"    : [ UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS32  | UC_MODE_LITTLE_ENDIAN ],
         }
         arch = get_arch()
 
