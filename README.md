@@ -27,6 +27,8 @@ Supports following architectures out of the box: **x86**, **x64**, **ARM**, **AR
 - `pip install unicorn` to install Unicorn python bindings
 - Use `File / Script file...` or `ALT+F7` in IDA to load **uEmu.py**
 
+Optionally **uEmu** can be loaded automatically as IDA plugin. In this case put it into [IDA]/Plugins folder and change `USE_AS_SCRIPT` to `False` inside **uEmu.py**
+
 ## Features
 
 ### Popup Menu

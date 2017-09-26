@@ -6,6 +6,8 @@
 #  Copyright (c) 2017 Alexander Hude. All rights reserved.
 #
 
+USE_AS_SCRIPT = True    # Set to `False` if you want to load uEmu automatically as IDA Plugin
+
 import pickle
 import threading
 import json
@@ -1183,11 +1185,11 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     popup_menu_hook = None
 
-    flags = PLUGIN_KEEP
+    flags = PLUGIN_HIDE
     comment = ""
 
     help = "Tiny cute emulator"
-    wanted_name = "Plugin"
+    wanted_name = PLUGIN_MENU_NAME
     wanted_hotkey = ""
 
     # --- PLUGIN DATA
@@ -1209,6 +1211,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def init(self):
         super(uEmuPlugin, self).__init__()
+        self.hook_ui_actions()
         uemu_log("Init plugin")
         return PLUGIN_KEEP
 
@@ -1219,14 +1222,13 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         uemu_log("Run plugin")
         self.register_menu_actions()
         self.attach_main_menu_actions()
-        self.hook_popup_menu_actions()
         self.unicornEngine = UnicornEngine(self)
 
     def term(self): # asynchronous unload (external, UI_Hook::term)
         self.unicornEngine = None
-        self.unhook_popup_menu_actions()
+        self.unhook_ui_actions()
         self.detach_main_menu_actions()
-        self.unregister_actions();
+        self.unregister_menu_actions()
         uemu_log("Unload plugin")
 
     def get_context_columns(self):
@@ -1235,10 +1237,16 @@ class uEmuPlugin(plugin_t, UI_Hooks):
     def unload_plugin(self): # synchronous unload (internal, Main Menu)
         self.unregister_popup_menu_actions()
         self.unregister_main_menu_actions()
-        self.unregister_actions();
+        self.unregister_menu_actions()
 
     def do_nothing(self):
         pass
+
+    def ready_to_run(self):
+        uemu_log("UI ready. Run plugin")
+        self.register_menu_actions()
+        self.attach_main_menu_actions()
+        self.unicornEngine = UnicornEngine(self)
 
     def follow_pc(self):
         return self.settings["follow_pc"];
@@ -1386,11 +1394,11 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     # --- POPUP MENU
 
-    def hook_popup_menu_actions(self):
+    def hook_ui_actions(self):
         self.popup_menu_hook = self
         self.popup_menu_hook.hook()
 
-    def unhook_popup_menu_actions(self):
+    def unhook_ui_actions(self):
         if self.popup_menu_hook != None:
             self.popup_menu_hook.unhook()
 
@@ -1612,9 +1620,11 @@ class uEmuPlugin(plugin_t, UI_Hooks):
             self.settings["force_code"] = True if settingsDlg.emu_group.value & kSettingsMask_ForceCode else False
             self.settings["trace_inst"] = True if settingsDlg.emu_group.value & kSettingsMask_TraceInst else False
 
-#def PLUGIN_ENTRY():
-#    return PluginPlugin()
-if __name__ == '__main__':
-    uEmu = uEmuPlugin()
-    uEmu.init()
-    uEmu.run()
+def PLUGIN_ENTRY():
+    return uEmuPlugin()
+
+if USE_AS_SCRIPT:
+    if __name__ == '__main__':
+        uEmu = uEmuPlugin()
+        uEmu.init()
+        uEmu.run()
