@@ -2,7 +2,7 @@
 
 **uEmu** is a tiny cute emulator plugin for IDA based on unicorn engine.
 
-Supports following architectures out of the box: **x86**, **x64**, **ARM**, **ARM64**
+Supports following architectures out of the box: **x86**, **x64**, **ARM**, **ARM64**, **MIPS**, **MIPS64**
 
 ![](./Resources/screenshots/doc_overview.png)
 
