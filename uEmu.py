@@ -6,12 +6,18 @@
 #  Copyright (c) 2017 Alexander Hude. All rights reserved.
 #
 
-USE_AS_SCRIPT = True    # Set to `False` if you want to load uEmu automatically as IDA Plugin
+UEMU_USE_AS_SCRIPT = True    # Set to `False` if you want to load uEmu automatically as IDA Plugin
+
+UEMU_PLUGIN_NAME        = "uEmu"
+UEMU_PLUGIN_MENU_NAME   = "uEmu"
+
+# === Import
 
 import pickle
 import threading
 import json
 import os
+import collections
 
 # IDA Python SDK
 from idaapi import *
@@ -49,13 +55,31 @@ from unicorn.arm64_const import *
 from unicorn.mips_const import *
 from unicorn.x86_const import *
 
-PLUGIN_NAME         = "uEmu"
-PLUGIN_MENU_NAME    = "uEmu"
+# === Configuration
 
 kIDAViewColor_PC    = 0x00B3CBFF
 kIDAViewColor_Reset = 0xFFFFFFFF
 
-# === Helpers
+# === Menu Helpers
+
+MenuItem = collections.namedtuple("MenuItem", ["action", "handler", "title", "tooltip", "shortcut", "popup"])
+
+class IdaMenuActionHandler(action_handler_t):
+    def __init__(self, handler, action):
+        action_handler_t.__init__(self)
+        self.action_handler = handler
+        self.action_type = action
+ 
+    def activate(self, ctx):
+        if ctx.form_type == BWN_DISASM:
+            self.action_handler.handle_menu_action(self.action_type)
+        return 1
+
+    # This action is always available.
+    def update(self, ctx):
+       return AST_ENABLE_ALWAYS
+
+# === Other Helpers
 
 kUnicornPageSize = 0x1000
 
@@ -230,14 +254,21 @@ def get_register_map(arch):
     }
     return registers[arch]  
 
+def is_thumb_ea(ea):
+    if ph.id == PLFM_ARM:
+        t = get_segreg(ea, 20) # get T flag
+        return t is not BADSEL and t is not 0
+    else:
+        return False
+
 def uemu_log(entry):
-    msg("[" + PLUGIN_NAME + "]: " + entry + "\n")
+    msg("[" + UEMU_PLUGIN_NAME + "]: " + entry + "\n")
 
 def trim_spaces(string):
     return ' '.join(str(string).split())
 
 def is_alt_pressed():
-    if QtWidgets.QApplication.keyboardModifiers() == QtCore.Qt.AltModifier:
+    if QtWidgets.QApplication.keyboardModifiers() & QtCore.Qt.AltModifier:
         return True
     else:
         return False
@@ -255,6 +286,7 @@ class CPUContextView(simplecustviewer_t):
 
     def __init__(self, owner):
         super(CPUContextView, self).__init__()
+        self.hooks = None
         self.owner = owner
         self.lastAddress = None
         self.lastContext = {}
@@ -298,8 +330,9 @@ class CPUContextView(simplecustviewer_t):
                         attach_action_to_popup(widget, popup, "-", None)
                         attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "Change Context", self.PopupActionHandler(self.form, self.form.menu_update),  None, None, -1))
                         attach_action_to_popup(widget, popup, "-", None)
-            self.hooks = Hooks(self)
-            self.hooks.hook()            
+            if self.hooks == None:
+                self.hooks = Hooks(self)
+                self.hooks.hook()            
         else:
             self.menu_cols1 = self.AddPopupMenu("1 Column")
             self.menu_cols2 = self.AddPopupMenu("2 Columns")
@@ -697,8 +730,7 @@ class ContextInitDialog(Choose2):
         ok = regDlg.Execute()
         if ok == 1:
             newValue = regDlg.reg_val.value
-            if newValue != BADADDR:
-                self.items[n][1] = "0x%X" % regDlg.reg_val.value
+            self.items[n][1] = "0x%X" % regDlg.reg_val.value
 
     def OnGetLine(self, n):
         return [ self.items[n][0], self.items[n][1] ] 
@@ -713,7 +745,7 @@ class ContextInitDialog(Choose2):
 class UnicornEngine(object):
 
     mu = None
-    pc = 0
+    pc = BADADDR
 
     emuActive       = False
     emuRunning      = False
@@ -895,17 +927,17 @@ class UnicornEngine(object):
                 continue
             elif overlap_start:     # partial overlap (start)
                 self.map_memory(tmp, segEnd - tmp)
-                if isLoaded(segStart):
+                if IDAAPI_IsLoaded(segStart):
                     uemu_log("  cpy [%X:%X]" % (tmp, segEnd - 1))
                     self.mu.mem_write(tmp, get_many_bytes(tmp, segEnd - tmp))
             elif overlap_end:       # patrial overlap (end)
                 self.map_memory(segStart, tmp - segStart)
-                if isLoaded(segStart):
+                if IDAAPI_IsLoaded(segStart):
                     uemu_log("  cpy [%X:%X]" % (segStart, tmp - 1))
                     self.mu.mem_write(segStart, get_many_bytes(segStart, tmp - segStart))
             else:                   # not found
                 self.map_memory(segStart, segEnd - segStart)
-                if isLoaded(segStart):
+                if IDAAPI_IsLoaded(segStart):
                     uemu_log("  cpy [%X:%X]" % (segStart, segEnd - 1))
                     self.mu.mem_write(segStart, get_many_bytes(segStart, segEnd - segStart))
 
@@ -918,7 +950,7 @@ class UnicornEngine(object):
     def hook_mem_access(self, uc, access, address, size, value, user_data):
         if self.is_breakpoint_reached(address):
             # vvv Workaround to fix issue when register are still updated even if emu_stop is called
-            self.fix_context = self.get_context()
+            self.fix_context = self.mu.context_save()
             # ^^^
             uc.emu_stop()
             def result_handler():
@@ -952,7 +984,7 @@ class UnicornEngine(object):
         execute_sync(StepResultCallable(result_handler), MFF_FAST)
         return True
 
-    def init_cpu_context(self):
+    def init_cpu_context(self, pc):
         reg_map = get_register_map(get_arch())
         regs = [ [ row[0], "0x0" ] for row in reg_map ]
 
@@ -961,6 +993,7 @@ class UnicornEngine(object):
         if ok:
             for idx, val in enumerate(cpuContext.items):
                 self.mu.reg_write(reg_map[idx][1], int(val[1], 0))
+            self.mu.reg_write(self.uc_reg_pc, pc)
             return True
         else:
             return False
@@ -982,7 +1015,7 @@ class UnicornEngine(object):
         self.pc = address
 
         try:
-            if self.init_cpu_context() == False:
+            if self.init_cpu_context(address) == False:
                 return
 
             uemu_log("Mapping segments...")
@@ -1007,7 +1040,7 @@ class UnicornEngine(object):
                     self.map_memory(segStart, endAligned - segStart)
 
                 # copy initialized bytes
-                if isLoaded(segStart):
+                if IDAAPI_IsLoaded(segStart):
                     uemu_log("  cpy [%X:%X]" % (segStart, segEnd - 1))
                     self.mu.mem_write(segStart, get_many_bytes(segStart, segEnd - segStart))
 
@@ -1026,8 +1059,8 @@ class UnicornEngine(object):
 
     def step_thread_main(self):
         try:
-            self.mu.emu_start(self.pc, 4, count=1)
-            # vvv Workaround to fix issue when register are still updated even if emu_stop is called
+            self.mu.emu_start(self.pc | 1 if is_thumb_ea(self.pc) else self.pc, 4, count=1)
+            # vvv Workaround to fix issue when registers are still updated even if emu_stop is called
             if self.fix_context is not None:
                 self.mu.context_restore(self.fix_context)
                 self.fix_context = None
@@ -1143,41 +1176,10 @@ class UnicornEngine(object):
         for (start, end, perm) in self.mu.mem_regions():
             uemu_log("  unmap [%X:%X]" % (start, end))
             self.mu.mem_unmap(start, end - start + 1)
+
+        IDAAPI_SetColor(self.pc, CIC_ITEM, kIDAViewColor_Reset)    
+        self.pc = BADADDR
         self.emuActive = False
-
-# === Memu Actions
-
-kMenuAction_Start              = 0
-kMenuAction_Run                = 1
-kMenuAction_Step               = 2
-kMenuAction_Stop               = 3
-kMenuAction_Reset              = 4
-kMenuAction_JumpToPC           = 5
-kMenuAction_ChangeCpuContext   = 6
-kMenuAction_Controls           = 7
-kMenuAction_CpuContext         = 8
-kMenuAction_Memory             = 9
-kMenuAction_MemoryMap          = 10
-kMenuAction_FetchSegments      = 11
-kMenuAction_LoadProject        = 12
-kMenuAction_SaveProject        = 13
-kMenuAction_Settings           = 14
-kMenuAction_Unload             = 15
-
-class IdaMenuActionHandler(action_handler_t):
-    def __init__(self, handler, action):
-        action_handler_t.__init__(self)
-        self.action_handler = handler
-        self.action_type = action
- 
-    def activate(self, ctx):
-        if ctx.form_type == BWN_DISASM:
-            self.action_handler.handle_menu_action(self.action_type)
-        return 1
-
-    # This action is always available.
-    def update(self, ctx):
-       return AST_ENABLE_ALWAYS
 
 # === uEmuPlugin
 
@@ -1189,7 +1191,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
     comment = ""
 
     help = "Tiny cute emulator"
-    wanted_name = PLUGIN_MENU_NAME
+    wanted_name = UEMU_PLUGIN_MENU_NAME
     wanted_hotkey = ""
 
     # --- PLUGIN DATA
@@ -1235,8 +1237,11 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         return 2
 
     def unload_plugin(self): # synchronous unload (internal, Main Menu)
-        self.unregister_popup_menu_actions()
-        self.unregister_main_menu_actions()
+        if self.unicornEngine.is_active():
+            self.unicornEngine.reset()
+        self.close_windows()
+        self.memoryViews.clear()
+        self.detach_main_menu_actions()
         self.unregister_menu_actions()
 
     def do_nothing(self):
@@ -1278,6 +1283,10 @@ class uEmuPlugin(plugin_t, UI_Hooks):
             file.close()
             uemu_log("Project saved to %s" % filePath)
 
+    # --- MAIN MENU
+
+    MENU_ITEMS = []
+
     def register_new_action(self, act_name, act_text, act_handler, shortcut, tooltip, icon):
         new_action = action_desc_t(
             act_name,       # The action name. This acts like an ID and must be unique
@@ -1288,109 +1297,49 @@ class uEmuPlugin(plugin_t, UI_Hooks):
             icon)           # Optional: the action icon (shows when in menus/toolbars)
         register_action(new_action)
 
-    def handle_menu_action(self, action_type):
-        actionHandlers = {
-            kMenuAction_Start              : self.emu_start,
-            kMenuAction_Run                : self.emu_run,
-            kMenuAction_Step               : self.emu_step,
-            kMenuAction_Stop               : self.emu_stop,
-            kMenuAction_Reset              : self.emu_reset,
-            kMenuAction_JumpToPC           : self.jump_to_pc,
-            kMenuAction_ChangeCpuContext   : self.change_cpu_context,
-            kMenuAction_Controls           : self.show_controls,
-            kMenuAction_CpuContext         : self.show_cpu_context,
-            kMenuAction_Memory             : self.show_memory,
-            kMenuAction_MemoryMap          : self.show_mapped,
-            kMenuAction_FetchSegments      : self.fetch_segments,
-            kMenuAction_LoadProject        : self.load_project,
-            kMenuAction_SaveProject        : self.save_project,
-            kMenuAction_Settings           : self.show_settings,
-            kMenuAction_Unload             : self.unload_plugin,
-        }
-
-        actionHandlers[action_type]()
-
-    # --- MAIN MENU
+    def handle_menu_action(self, action):
+        [x.handler() for x in self.MENU_ITEMS if x.action == action]
 
     def register_menu_actions(self):
-        self.register_new_action(PLUGIN_NAME + ':start',     'Start',               IdaMenuActionHandler(self, kMenuAction_Start),            None,               'Start emulation',  -1)
-        self.register_new_action(PLUGIN_NAME + ':run',       'Run',                 IdaMenuActionHandler(self, kMenuAction_Run),              None,               'Run',  -1)
-        self.register_new_action(PLUGIN_NAME + ':step',      'Step',                IdaMenuActionHandler(self, kMenuAction_Step),             "SHIFT+CTRL+ALT+S", 'Step to next instruction',  -1)
-        self.register_new_action(PLUGIN_NAME + ':stop',      'Stop',                IdaMenuActionHandler(self, kMenuAction_Stop),             None,               'Stop emulation',  -1)
-        self.register_new_action(PLUGIN_NAME + ':reset',     'Reset',               IdaMenuActionHandler(self, kMenuAction_Reset),            None,               'Reset emulation',  -1)
-        self.register_new_action(PLUGIN_NAME + ':jmp_pc',    'Jump to PC',          IdaMenuActionHandler(self, kMenuAction_JumpToPC),         "SHIFT+CTRL+ALT+J", 'Jump to PC',  -1)
-        self.register_new_action(PLUGIN_NAME + ':cng_cpu',   'Change CPU Context',  IdaMenuActionHandler(self, kMenuAction_ChangeCpuContext), None,               'Change CPU Context',  -1)
-        self.register_new_action(PLUGIN_NAME + ':ctl_view',  'Show Controls',       IdaMenuActionHandler(self, kMenuAction_Controls),         None,               'Show Control Window',  -1)
-        self.register_new_action(PLUGIN_NAME + ':cpu_view',  'Show CPU Context',    IdaMenuActionHandler(self, kMenuAction_CpuContext),       None,               'Show CPU Registers',  -1)
-        self.register_new_action(PLUGIN_NAME + ':mem_view',  'Show Memory Range',   IdaMenuActionHandler(self, kMenuAction_Memory),           None,               'Show Memory Range',  -1)
-        self.register_new_action(PLUGIN_NAME + ':mem_map',   'Show Mapped Memory',  IdaMenuActionHandler(self, kMenuAction_MemoryMap),        None,               'Show Mapped Memory',  -1)
-        self.register_new_action(PLUGIN_NAME + ':fetch_segs','Fetch Segments',      IdaMenuActionHandler(self, kMenuAction_FetchSegments),    None,               'Fetch Segments',  -1)
-        self.register_new_action(PLUGIN_NAME + ':load_prj',  'Load Project',        IdaMenuActionHandler(self, kMenuAction_LoadProject),      None,               'Load Project',  -1)
-        self.register_new_action(PLUGIN_NAME + ':save_prj',  'Save Project',        IdaMenuActionHandler(self, kMenuAction_SaveProject),      None,               'Save Project',  -1)
-        self.register_new_action(PLUGIN_NAME + ':settings',  'Settings',            IdaMenuActionHandler(self, kMenuAction_Settings),         None,               'Settings',  -1)
-        self.register_new_action(PLUGIN_NAME + ':unload',    'Unload Plugin',       IdaMenuActionHandler(self, kMenuAction_Unload),           None,               'Unload Plugin',  -1)
+        self.MENU_ITEMS.append(MenuItem(UEMU_PLUGIN_NAME + ":start",             self.emu_start,             "Start",               "Start emulation",           None,                   True    ))
+        self.MENU_ITEMS.append(MenuItem(UEMU_PLUGIN_NAME + ":run",               self.emu_run,               "Run",                 "Run",                       None,                   True    ))
+        self.MENU_ITEMS.append(MenuItem(UEMU_PLUGIN_NAME + ":step",              self.emu_step,              "Step",                "Step to next instruction",  "SHIFT+CTRL+ALT+S",     True    ))
+        self.MENU_ITEMS.append(MenuItem(UEMU_PLUGIN_NAME + ":stop",              self.emu_stop,              "Stop",                "Stop emulation",            None,                   True    ))
+        self.MENU_ITEMS.append(MenuItem(UEMU_PLUGIN_NAME + ":reset",             self.emu_reset,             "Reset",               "Reset emulation",           None,                   True    ))
+        self.MENU_ITEMS.append(MenuItem("-",                                     self.do_nothing,            "",                    None,                        None,                   True    ))
+        self.MENU_ITEMS.append(MenuItem(UEMU_PLUGIN_NAME + ":jmp_pc",            self.jump_to_pc,            "Jump to PC",          "Jump to PC",                "SHIFT+CTRL+ALT+J",     True    ))
+        self.MENU_ITEMS.append(MenuItem(UEMU_PLUGIN_NAME + ":cng_cpu",           self.change_cpu_context,    "Change CPU Context",  "Change CPU Context",        None,                   True    ))
+        self.MENU_ITEMS.append(MenuItem("-",                                     self.do_nothing,            "",                    None,                        None,                   True    ))
+        self.MENU_ITEMS.append(MenuItem(UEMU_PLUGIN_NAME + ":ctl_view",          self.show_controls,         "Show Controls",       "Show Control Window",       None,                   True    ))
+        self.MENU_ITEMS.append(MenuItem(UEMU_PLUGIN_NAME + ":cpu_view",          self.show_cpu_context,      "Show CPU Context",    "Show CPU Registers",        None,                   True    ))
+        self.MENU_ITEMS.append(MenuItem(UEMU_PLUGIN_NAME + ":mem_view",          self.show_memory,           "Show Memory Range",   "Show Memory Range",         None,                   True    ))
+        self.MENU_ITEMS.append(MenuItem(UEMU_PLUGIN_NAME + ":mem_map",           self.show_mapped,           "Show Mapped Memory",  "Show Mapped Memory",        None,                   False   ))
+        self.MENU_ITEMS.append(MenuItem(UEMU_PLUGIN_NAME + ":fetch_segs",        self.fetch_segments,        "Fetch Segments",      "Fetch Segments",            None,                   False   ))
+        self.MENU_ITEMS.append(MenuItem("-",                                     self.do_nothing,            "",                    None,                        None,                   False   ))
+        self.MENU_ITEMS.append(MenuItem(UEMU_PLUGIN_NAME + ":load_prj",          self.load_project,          "Load Project",        "Load Project",              None,                   False   ))
+        self.MENU_ITEMS.append(MenuItem(UEMU_PLUGIN_NAME + ":save_prj",          self.save_project,          "Save Project",        "Save Project",              None,                   False   ))
+        self.MENU_ITEMS.append(MenuItem(UEMU_PLUGIN_NAME + ":settings",          self.show_settings,         "Settings",            "Settings",                  None,                   False   ))
+        self.MENU_ITEMS.append(MenuItem("-",                                     self.do_nothing,            "",                    None,                        None,                   False   ))
+        self.MENU_ITEMS.append(MenuItem(UEMU_PLUGIN_NAME + ":unload",            self.unload_plugin,         "Unload Plugin",       "Unload Plugin",             None,                   False   ))
+
+        for item in self.MENU_ITEMS:
+            if item.action == "-":
+                continue
+            self.register_new_action(item.action, item.title, IdaMenuActionHandler(self, item.action), item.shortcut, item.tooltip,  -1)
 
     def unregister_menu_actions(self):
-        unregister_action(PLUGIN_NAME + ':start')
-        unregister_action(PLUGIN_NAME + ':run')
-        unregister_action(PLUGIN_NAME + ':step')
-        unregister_action(PLUGIN_NAME + ':stop')
-        unregister_action(PLUGIN_NAME + ':reset')
-        unregister_action(PLUGIN_NAME + ':jmp_pc')
-        unregister_action(PLUGIN_NAME + ':cng_cpu')
-        unregister_action(PLUGIN_NAME + ':ctl_view')
-        unregister_action(PLUGIN_NAME + ':cpu_view')
-        unregister_action(PLUGIN_NAME + ':mem_view')
-        unregister_action(PLUGIN_NAME + ':mem_map')
-        unregister_action(PLUGIN_NAME + ':fetch_segs')
-        unregister_action(PLUGIN_NAME + ':load_prj')
-        unregister_action(PLUGIN_NAME + ':save_prj')
-        unregister_action(PLUGIN_NAME + ':settings')
-        unregister_action(PLUGIN_NAME + ':unload')
+        for item in self.MENU_ITEMS:
+            if item.action == "-":
+                continue
+            unregister_action(item.action)
 
     def attach_main_menu_actions(self):
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Start",                 PLUGIN_NAME + ":start",        SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Run",                   PLUGIN_NAME + ":run",          SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Step",                  PLUGIN_NAME + ":step",         SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Stop",                  PLUGIN_NAME + ":stop",         SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Reset",                 PLUGIN_NAME + ":reset",        SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/",                      "-",                           SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Jump to PC",            PLUGIN_NAME + ":jmp_pc",       SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Change CPU Context",    PLUGIN_NAME + ":cng_cpu",      SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/",                      "-",                           SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Show Controls",         PLUGIN_NAME + ":ctl_view",     SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Show CPU Context",      PLUGIN_NAME + ":cpu_view",     SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Show Memory Range",     PLUGIN_NAME + ":mem_view",     SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Show Mapped Memory",    PLUGIN_NAME + ":mem_map",      SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Fetch Segments",        PLUGIN_NAME + ":fetch_segs",   SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/",                      "-",                           SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Load Project",          PLUGIN_NAME + ":load_prj",     SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Save Project",          PLUGIN_NAME + ":save_prj",     SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Settings",              PLUGIN_NAME + ":settings",     SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/",                      "-",                           SETMENU_APP)
-        attach_action_to_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Unload Plugin",         PLUGIN_NAME + ":unload",       SETMENU_APP)
+        for item in self.MENU_ITEMS:
+            attach_action_to_menu("Edit/Plugins/" + UEMU_PLUGIN_MENU_NAME + "/" + item.title, item.action, SETMENU_APP)
 
     def detach_main_menu_actions(self):
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Start",                 PLUGIN_NAME + ":start")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Run",                   PLUGIN_NAME + ":run")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Step",                  PLUGIN_NAME + ":step")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Stop",                  PLUGIN_NAME + ":stop")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Reset",                 PLUGIN_NAME + ":reset")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/",                      "-")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Jump to PC",            PLUGIN_NAME + ":jmp_pc")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Change CPU Context",    PLUGIN_NAME + ":cng_cpu")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/",                      "-")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Show Controls",         PLUGIN_NAME + ":ctl_view")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Show CPU Context",      PLUGIN_NAME + ":cpu_view")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Show Memory Range",     PLUGIN_NAME + ":mem_view")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Show Mapped Memory",    PLUGIN_NAME + ":mem_map")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Fetch Segments",        PLUGIN_NAME + ":fetch_segs")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/",                      "-")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Load Project",          PLUGIN_NAME + ":load_prj")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Save Project",          PLUGIN_NAME + ":save_prj")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Settings",              PLUGIN_NAME + ":settings")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/",                      "-")
-        detach_action_from_menu("Edit/Plugins/" + PLUGIN_MENU_NAME + "/Unload Plugin",         PLUGIN_NAME + ":unload")
+        for item in self.MENU_ITEMS:
+            detach_action_from_menu("Edit/Plugins/" + UEMU_PLUGIN_MENU_NAME + "/" + item.title, item.action)
 
     # --- POPUP MENU
 
@@ -1404,18 +1353,9 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def finish_populating_tform_popup(self, form, popup_handle):
         if get_tform_type(form) == BWN_DISASM:
-            attach_action_to_popup(form, popup_handle, PLUGIN_NAME + ":start",    PLUGIN_MENU_NAME + "/")
-            attach_action_to_popup(form, popup_handle, PLUGIN_NAME + ":run",      PLUGIN_MENU_NAME + "/")
-            attach_action_to_popup(form, popup_handle, PLUGIN_NAME + ":step",     PLUGIN_MENU_NAME + "/")
-            attach_action_to_popup(form, popup_handle, PLUGIN_NAME + ":stop",     PLUGIN_MENU_NAME + "/")
-            attach_action_to_popup(form, popup_handle, PLUGIN_NAME + ":reset",    PLUGIN_MENU_NAME + "/")
-            attach_action_to_popup(form, popup_handle, "-",                       PLUGIN_MENU_NAME + "/")
-            attach_action_to_popup(form, popup_handle, PLUGIN_NAME + ":jmp_pc",   PLUGIN_MENU_NAME + "/")
-            attach_action_to_popup(form, popup_handle, PLUGIN_NAME + ":cng_cpu",  PLUGIN_MENU_NAME + "/")
-            attach_action_to_popup(form, popup_handle, "-",                       PLUGIN_MENU_NAME + "/")
-            attach_action_to_popup(form, popup_handle, PLUGIN_NAME + ":ctl_view", PLUGIN_MENU_NAME + "/")
-            attach_action_to_popup(form, popup_handle, PLUGIN_NAME + ":cpu_view", PLUGIN_MENU_NAME + "/")
-            attach_action_to_popup(form, popup_handle, PLUGIN_NAME + ":mem_view", PLUGIN_MENU_NAME + "/")
+            for item in self.MENU_ITEMS:
+                if item.popup:
+                    attach_action_to_popup(form, popup_handle, item.action, UEMU_PLUGIN_MENU_NAME + "/")
 
     # --- DELEGATES
 
@@ -1498,13 +1438,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         
         self.unicornEngine.reset()
 
-        if self.cpuContextView is not None:
-            self.cpuContextView.Close()
-            self.cpuContextView = None
-
-        for viewid in self.memoryViews:
-            self.memoryViews[viewid].Close()
-            self.memoryViews[viewid] = None
+        self.close_windows()
 
         self.memoryViews.clear()
         uemu_log("Emulation reset")
@@ -1620,10 +1554,19 @@ class uEmuPlugin(plugin_t, UI_Hooks):
             self.settings["force_code"] = True if settingsDlg.emu_group.value & kSettingsMask_ForceCode else False
             self.settings["trace_inst"] = True if settingsDlg.emu_group.value & kSettingsMask_TraceInst else False
 
+    def close_windows(self):
+        if self.cpuContextView is not None:
+            self.cpuContextView.Close()
+            self.cpuContextView = None
+
+        for viewid in self.memoryViews:
+            self.memoryViews[viewid].Close()
+            self.memoryViews[viewid] = None
+
 def PLUGIN_ENTRY():
     return uEmuPlugin()
 
-if USE_AS_SCRIPT:
+if UEMU_USE_AS_SCRIPT:
     if __name__ == '__main__':
         uEmu = uEmuPlugin()
         uEmu.init()
