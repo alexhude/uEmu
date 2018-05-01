@@ -4,9 +4,9 @@
 #
 #  Created by Alexander Hude on 26/07/17.
 #  Copyright (c) 2017 Alexander Hude. All rights reserved.
-#
+#  Modifications for IDA 7.1 (c) 2018 Bjoern Kerler.
 
-UEMU_USE_AS_SCRIPT = True    # Set to `False` if you want to load uEmu automatically as IDA Plugin
+UEMU_USE_AS_SCRIPT = False    # Set to `False` if you want to load uEmu automatically as IDA Plugin
 
 UEMU_PLUGIN_NAME        = "uEmu"
 UEMU_PLUGIN_MENU_NAME   = "uEmu"
@@ -20,29 +20,23 @@ import os
 import collections
 
 # IDA Python SDK
+import ida_hexrays
+import ida_kernwin
+import ida_allins
 from idaapi import *
 from idc import *
+from idautils import *
 
-if IDA_SDK_VERSION >= 700:
-    IDAAPI_IsCode       = is_code
-    IDAAPI_DelItems     = del_items
-    IDAAPI_MakeCode     = create_insn
-    IDAAPI_GetFlags     = get_full_flags
-    IDAAPI_SetColor     = set_color
-    IDAAPI_IsLoaded     = is_loaded
-    IDAAPI_GetBptQty    = get_bpt_qty
-    IDAAPI_GetBptEA     = get_bpt_ea
-    IDAAPI_GetBptAttr   = get_bpt_attr
-else:
-    IDAAPI_IsCode       = isCode
-    IDAAPI_DelItems     = MakeUnkn
-    IDAAPI_MakeCode     = MakeCode
-    IDAAPI_GetFlags     = getFlags
-    IDAAPI_SetColor     = SetColor
-    IDAAPI_IsLoaded     = isLoaded
-    IDAAPI_GetBptQty    = GetBptQty
-    IDAAPI_GetBptEA     = GetBptEA
-    IDAAPI_GetBptAttr   = GetBptAttr
+IDAAPI_IsCode       = is_code
+IDAAPI_DelItems     = del_items
+IDAAPI_MakeCode     = create_insn
+IDAAPI_GetFlags     = get_full_flags
+IDAAPI_SetColor     = set_color
+IDAAPI_IsLoaded     = is_loaded
+IDAAPI_GetBptQty    = get_bpt_qty
+IDAAPI_GetBptEA     = get_bpt_ea
+IDAAPI_GetBptAttr   = get_bpt_attr
+IDAAPI_refresh_idaview = refresh_idaview_anyway
 
 # PyQt
 from PyQt5 import QtCore, QtWidgets
@@ -87,10 +81,7 @@ ALIGN_PAGE_DOWN = lambda x: x & ~(kUnicornPageSize - 1)
 ALIGN_PAGE_UP   = lambda x: (x + kUnicornPageSize - 1) & ~(kUnicornPageSize-1)
 
 def inf_is_be():
-    if IDA_SDK_VERSION >= 700:
-        return cvar.inf.is_be()
-    else:
-        return cvar.inf.mf
+    return cvar.inf.is_be()
 
 def get_arch():
     if ph.id == PLFM_386 and ph.flag & PR_USE64:
@@ -255,7 +246,7 @@ def get_register_map(arch):
     return registers[arch]  
 
 def is_thumb_ea(ea):
-    if ph.id == PLFM_ARM:
+    if ph.id == PLFM_ARM and not ph.flag & PR_USE64:
         t = get_segreg(ea, 20) # get T flag
         return t is not BADSEL and t is not 0
     else:
@@ -298,47 +289,40 @@ class CPUContextView(simplecustviewer_t):
         if not simplecustviewer_t.Create(self, title):
             return False
 
-        if IDA_SDK_VERSION >= 700:
-            self.menu_cols1 = 1
-            self.menu_cols2 = 2
-            self.menu_cols3 = 3
-            self.menu_update = 4
+        self.menu_cols1 = 1
+        self.menu_cols2 = 2
+        self.menu_cols3 = 3
+        self.menu_update = 4
 
-            class Hooks(idaapi.UI_Hooks):
+        class Hooks(ida_kernwin.UI_Hooks):
 
-                class PopupActionHandler(action_handler_t):
-                    def __init__(self, owner, menu_id):
-                        action_handler_t.__init__(self)
-                        self.owner = owner
-                        self.menu_id = menu_id
+            class PopupActionHandler(action_handler_t):
+                def __init__(self, owner, menu_id):
+                    action_handler_t.__init__(self)
+                    self.owner = owner
+                    self.menu_id = menu_id
 
-                    def activate(self, ctx):
-                        self.owner.OnPopupMenu(self.menu_id)
+                def activate(self, ctx):
+                    self.owner.OnPopupMenu(self.menu_id)
 
-                    def update(self, ctx):
-                        return idaapi.AST_ENABLE_ALWAYS
+                def update(self, ctx):
+                    return ida_kernwin.AST_ENABLE_ALWAYS
 
-                def __init__(self, form):
-                    idaapi.UI_Hooks.__init__(self)
-                    self.form = form
+            def __init__(self, form):
+                ida_kernwin.UI_Hooks.__init__(self)
+                self.form = form
 
-                def finish_populating_widget_popup(self, widget, popup):
-                    if self.form.title == get_widget_title(widget):
-                        attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "1 Column",       self.PopupActionHandler(self.form, self.form.menu_cols1),   None, None, -1))
-                        attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "2 Columns",      self.PopupActionHandler(self.form, self.form.menu_cols2),   None, None, -1))
-                        attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "3 Columns",      self.PopupActionHandler(self.form, self.form.menu_cols3),   None, None, -1))
-                        attach_action_to_popup(widget, popup, "-", None)
-                        attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "Change Context", self.PopupActionHandler(self.form, self.form.menu_update),  None, None, -1))
-                        attach_action_to_popup(widget, popup, "-", None)
-            if self.hooks == None:
-                self.hooks = Hooks(self)
-                self.hooks.hook()            
-        else:
-            self.menu_cols1 = self.AddPopupMenu("1 Column")
-            self.menu_cols2 = self.AddPopupMenu("2 Columns")
-            self.menu_cols3 = self.AddPopupMenu("3 Columns")
-            self.menu_sep = self.AddPopupMenu("")
-            self.menu_update = self.AddPopupMenu("Change Context")
+            def finish_populating_widget_popup(self, widget, popup):
+                if self.form.title == get_widget_title(widget):
+                    attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "1 Column",       self.PopupActionHandler(self.form, self.form.menu_cols1),   None, None, -1))
+                    attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "2 Columns",      self.PopupActionHandler(self.form, self.form.menu_cols2),   None, None, -1))
+                    attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "3 Columns",      self.PopupActionHandler(self.form, self.form.menu_cols3),   None, None, -1))
+                    attach_action_to_popup(widget, popup, "-", None)
+                    attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "Change Context", self.PopupActionHandler(self.form, self.form.menu_update),  None, None, -1))
+                    attach_action_to_popup(widget, popup, "-", None)
+        if self.hooks == None:
+            self.hooks = Hooks(self)
+            self.hooks.hook()            
         return True
 
     def OnPopupMenu(self, menu_id):
@@ -1092,7 +1076,8 @@ class UnicornEngine(object):
 
                 # emulation stopped - update UI
                 IDAAPI_SetColor(self.pc, CIC_ITEM, kIDAViewColor_PC)
-
+                IDAAPI_refresh_idaview()
+                
                 self.owner.update_context(self.pc, self.mu)
 
                 if self.owner.follow_pc():
@@ -1135,7 +1120,7 @@ class UnicornEngine(object):
 
                 # emulation stopped - update UI
                 IDAAPI_SetColor(self.pc, CIC_ITEM, kIDAViewColor_PC)
-
+                IDAAPI_refresh_idaview()
                 self.owner.update_context(self.pc, self.mu)
 
                 if self.owner.follow_pc():
