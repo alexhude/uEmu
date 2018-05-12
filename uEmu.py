@@ -1163,10 +1163,7 @@ class uEmuUnicornEngine(object):
 
     def step_thread_main(self):
         try:
-            uemu_log("Emu start")
             self.mu.emu_start(self.pc | 1 if UEMU_HELPERS.is_thumb_ea(self.pc) else self.pc, 4, count=1)
-            self.pc = self.mu.reg_read(self.uc_reg_pc)
-            uemu_log("PC 0x%X" % self.pc)
             # vvv Workaround to fix issue when registers are still updated even if emu_stop is called
             if self.fix_context is not None:
                 self.mu.context_restore(self.fix_context)
