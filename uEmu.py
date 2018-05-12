@@ -22,6 +22,12 @@ import collections
 # IDA Python SDK
 from idaapi import *
 from idc import *
+# Add IDA >= 7.1 SDK support
+from idautils import *
+import ida_hexrays
+import ida_kernwin
+import ida_allins
+
 
 if IDA_SDK_VERSION >= 700:
     # functions
@@ -355,32 +361,60 @@ class uEmuCpuContextView(simplecustviewer_t):
             self.menu_cols3 = 3
             self.menu_update = 4
 
-            class Hooks(idaapi.UI_Hooks):
+            if IDA_SDK_VERSION >= 710:
+            
+                class Hooks(ida_kernwin.UI_Hooks):
+                    class PopupActionHandler(action_handler_t):
+                        def __init__(self, owner, menu_id):
+                            action_handler_t.__init__(self)
+                            self.owner = owner
+                            self.menu_id = menu_id
 
-                class PopupActionHandler(action_handler_t):
-                    def __init__(self, owner, menu_id):
-                        action_handler_t.__init__(self)
-                        self.owner = owner
-                        self.menu_id = menu_id
+                        def activate(self, ctx):
+                            self.owner.OnPopupMenu(self.menu_id)
 
-                    def activate(self, ctx):
-                        self.owner.OnPopupMenu(self.menu_id)
+                        def update(self, ctx):
+                            return ida_kernwin.AST_ENABLE_ALWAYS
 
-                    def update(self, ctx):
-                        return idaapi.AST_ENABLE_ALWAYS
+                    def __init__(self, form):
+                        ida_kernwin.UI_Hooks.__init__(self)
+                        self.form = form
 
-                def __init__(self, form):
-                    idaapi.UI_Hooks.__init__(self)
-                    self.form = form
+                    def finish_populating_widget_popup(self, widget, popup):
+                        if self.form.title == get_widget_title(widget):
+                            attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "1 Column",       self.PopupActionHandler(self.form, self.form.menu_cols1),   None, None, -1))
+                            attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "2 Columns",      self.PopupActionHandler(self.form, self.form.menu_cols2),   None, None, -1))
+                            attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "3 Columns",      self.PopupActionHandler(self.form, self.form.menu_cols3),   None, None, -1))
+                            attach_action_to_popup(widget, popup, "-", None)
+                            attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "Change Context", self.PopupActionHandler(self.form, self.form.menu_update),  None, None, -1))
+                            attach_action_to_popup(widget, popup, "-", None)
+            else:
+                class Hooks(idaapi.UI_Hooks):
+                    class PopupActionHandler(action_handler_t):
+                        def __init__(self, owner, menu_id):
+                            action_handler_t.__init__(self)
+                            self.owner = owner
+                            self.menu_id = menu_id
 
-                def finish_populating_widget_popup(self, widget, popup):
-                    if self.form.title == get_widget_title(widget):
-                        attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "1 Column",       self.PopupActionHandler(self.form, self.form.menu_cols1),   None, None, -1))
-                        attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "2 Columns",      self.PopupActionHandler(self.form, self.form.menu_cols2),   None, None, -1))
-                        attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "3 Columns",      self.PopupActionHandler(self.form, self.form.menu_cols3),   None, None, -1))
-                        attach_action_to_popup(widget, popup, "-", None)
-                        attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "Change Context", self.PopupActionHandler(self.form, self.form.menu_update),  None, None, -1))
-                        attach_action_to_popup(widget, popup, "-", None)
+                        def activate(self, ctx):
+                            self.owner.OnPopupMenu(self.menu_id)
+
+                        def update(self, ctx):
+                            return idaapi.AST_ENABLE_ALWAYS
+
+                    def __init__(self, form):
+                        idaapi.UI_Hooks.__init__(self)
+                        self.form = form
+
+                    def finish_populating_widget_popup(self, widget, popup):
+                        if self.form.title == get_widget_title(widget):
+                            attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "1 Column",       self.PopupActionHandler(self.form, self.form.menu_cols1),   None, None, -1))
+                            attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "2 Columns",      self.PopupActionHandler(self.form, self.form.menu_cols2),   None, None, -1))
+                            attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "3 Columns",      self.PopupActionHandler(self.form, self.form.menu_cols3),   None, None, -1))
+                            attach_action_to_popup(widget, popup, "-", None)
+                            attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "Change Context", self.PopupActionHandler(self.form, self.form.menu_update),  None, None, -1))
+                            attach_action_to_popup(widget, popup, "-", None)
+            
             if self.hooks == None:
                 self.hooks = Hooks(self)
                 self.hooks.hook()            
@@ -515,7 +549,7 @@ class uEmuMemoryView(simplecustviewer_t):
         self.ClearLines()
         
         if context is None:
-            return;
+            return
 
         memory = context.mem_read(self.address, self.size)
 
@@ -1324,13 +1358,13 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         self.unicornEngine = uEmuUnicornEngine(self)
 
     def follow_pc(self):
-        return self.settings["follow_pc"];
+        return self.settings["follow_pc"]
 
     def force_code(self):
-        return self.settings["force_code"];
+        return self.settings["force_code"]
 
     def trace_inst(self):
-        return self.settings["trace_inst"];
+        return self.settings["trace_inst"]
 
     def load_project(self):
         filePath = IDAAPI_AskFile(0, "*.emu", "Open eEmu project")
@@ -1459,11 +1493,11 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def emu_start(self):
         if self.unicornEngine.is_active():
-            uemu_log("Emulator is already active");
+            uemu_log("Emulator is already active")
             return
 
         if self.unicornEngine.is_running():
-            uemu_log("Emulator is running");
+            uemu_log("Emulator is running")
             return
 
         uemu_log("Emulation started")
@@ -1471,22 +1505,22 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def emu_run(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         if self.unicornEngine.is_running():
-            uemu_log("Emulator is running");
+            uemu_log("Emulator is running")
             return
 
         self.unicornEngine.run()
 
     def emu_step(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         if self.unicornEngine.is_running():
-            uemu_log("Emulator is running");
+            uemu_log("Emulator is running")
             return
         count = 1
         if UEMU_HELPERS.is_alt_pressed():
@@ -1500,18 +1534,18 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def emu_stop(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         if not self.unicornEngine.is_running():
-            uemu_log("Emulator is not running");
+            uemu_log("Emulator is not running")
             return
 
         self.unicornEngine.interrupt()
 
     def emu_reset(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
         
         self.unicornEngine.reset()
@@ -1523,22 +1557,22 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def jump_to_pc(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         if self.unicornEngine.is_running():
-            uemu_log("Emulator is running");
+            uemu_log("Emulator is running")
             return
 
         self.unicornEngine.jump_to_pc()
 
     def change_cpu_context(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         if self.unicornEngine.is_running():
-            uemu_log("Emulator is running");
+            uemu_log("Emulator is running")
             return
 
         self.unicornEngine.set_cpu_context()
@@ -1552,7 +1586,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def show_cpu_context(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         if self.cpuContextView is None:
@@ -1564,7 +1598,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def show_memory(self, address = 0, size = 16):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         memRangeDlg = uEmuMemoryRangeDialog()
@@ -1596,7 +1630,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def show_mapped(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         mappeduEmuMemoryView = uEmuMappeduMemoryView(self, self.unicornEngine.get_mapped_memory())
@@ -1604,11 +1638,11 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def fetch_segments(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         if self.unicornEngine.is_running():
-            uemu_log("Emulator is running");
+            uemu_log("Emulator is running")
             return
 
         self.unicornEngine.fetch_segments()
