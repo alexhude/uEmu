@@ -22,6 +22,7 @@ import collections
 # IDA Python SDK
 from idaapi import *
 from idc import *
+from idautils import *
 
 if IDA_SDK_VERSION >= 700:
     # functions
