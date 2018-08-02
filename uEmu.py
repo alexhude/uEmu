@@ -42,9 +42,11 @@ if IDA_SDK_VERSION >= 700:
     IDAAPI_GetBytes     = get_bytes
     IDAAPI_AskYN        = ask_yn
     IDAAPI_AskFile      = ask_file
+    IDAAPI_AskLong      = ask_long
     IDAAPI_NextHead     = next_head
     IDAAPI_GetDisasm    = generate_disasm_line
     IDAAPI_NextThat     = next_that
+    IDAAPI_Jump         = jumpto
     # classes
     IDAAPI_Choose       = Choose
 else:
@@ -65,9 +67,11 @@ else:
     IDAAPI_GetBytes     = get_many_bytes
     IDAAPI_AskYN        = AskYN
     IDAAPI_AskFile      = AskFile
+    IDAAPI_AskLong      = AskLong
     IDAAPI_NextHead     = NextHead
     IDAAPI_GetDisasm    = GetDisasmEx
     IDAAPI_NextThat     = nextthat
+    IDAAPI_Jump         = Jump
     # classes
     IDAAPI_Choose       = Choose2
 
@@ -298,7 +302,10 @@ class UEMU_HELPERS:
     @staticmethod
     def is_thumb_ea(ea):
         if ph.id == PLFM_ARM and not ph.flag & PR_USE64:
-            t = get_segreg(ea, 20) # get T flag
+            if IDA_SDK_VERSION >= 700:
+                t = get_sreg(ea, "T") # get T flag
+            else:
+                t = get_segreg(ea, 20) # get T flag
             return t is not BADSEL and t is not 0
         else:
             return False
@@ -382,6 +389,7 @@ class uEmuCpuContextView(simplecustviewer_t):
                         attach_action_to_popup(widget, popup, "-", None)
                         attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "Change Context", self.PopupActionHandler(self.form, self.form.menu_update),  None, None, -1))
                         attach_action_to_popup(widget, popup, "-", None)
+
             if self.hooks == None:
                 self.hooks = Hooks(self)
                 self.hooks.hook()            
@@ -476,6 +484,8 @@ class uEmuCpuContextView(simplecustviewer_t):
         self.lastAddress = address
 
     def OnClose(self):
+        self.hooks.unhook()
+        self.hooks = None
         self.owner.context_view_closed()
 
 # === uEmuMemoryView
@@ -516,7 +526,7 @@ class uEmuMemoryView(simplecustviewer_t):
         self.ClearLines()
         
         if context is None:
-            return;
+            return
 
         memory = context.mem_read(self.address, self.size)
 
@@ -687,9 +697,9 @@ BUTTON CANCEL Cancel
 uEmu Settings
 <Follow PC:{chk_followpc}>
 <Convert to Code automatically:{chk_forcecode}>
-<Trace instructions:{trc_inst}>{emu_group}>
+<Trace instructions:{chk_trace}>{emu_group}>
 """, {
-        'emu_group': Form.ChkGroupControl(("chk_followpc", "chk_forcecode", "trc_inst")),
+        'emu_group': Form.ChkGroupControl(("chk_followpc", "chk_forcecode", "chk_trace")),
         })
 
 # === uEmuUnicornEngine
@@ -745,7 +755,7 @@ class uEmuContextInitDialog(IDAAPI_Choose):
     def __init__(self, regs, flags=0, width=None, height=None, embedded=False):
         IDAAPI_Choose.__init__(
             self,
-            "uEmu CPU Context",
+            "uEmu CPU Context Edit",
             [ ["Register", 10], ["Value", 30] ],
             flags = flags,
             width = width,
@@ -829,10 +839,8 @@ class uEmuUnicornEngine(object):
         arch = UEMU_HELPERS.get_arch()
 
         self.uc_reg_pc = uc_setup[arch][0]
-        self.mu = Uc(uc_setup[arch][1], uc_setup[arch][2])
-
-        self.mu.hook_add(UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED, self.hook_mem_invalid)
-        self.mu.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE, self.hook_mem_access)
+        self.uc_arch = uc_setup[arch][1]
+        self.uc_mode = uc_setup[arch][2]
         uemu_log("CPU arch set to [ %s ]" % (arch))
 
     def is_active(self):
@@ -876,9 +884,9 @@ class uEmuUnicornEngine(object):
 
         if not self.emuActive:
             if self.owner.trace_inst():
-                bytes = IDAAPI_GetBytes(self.pc, 4)
+                bytes = IDAAPI_GetBytes(self.pc, IDAAPI_NextHead(self.pc) - self.pc)
                 bytes_hex = " ".join("{:02X}".format(ord(c)) for c in bytes)
-                uemu_log("* TRACE<I> 0x%X | %16s | %s" % (self.pc, bytes_hex, IDAAPI_GetDisasm(self.pc, 0)))
+                uemu_log("* TRACE<I> 0x%X | %-16s | %s" % (self.pc, bytes_hex, IDAAPI_GetDisasm(self.pc, 0)))
 
             self.emuActive = True
 
@@ -890,7 +898,7 @@ class uEmuUnicornEngine(object):
             return False
 
     def jump_to_pc(self):
-        Jump(self.pc)
+        IDAAPI_Jump(self.pc)
 
     def map_memory(self, address, size):
         # - size is unsigned and must be != 0
@@ -1067,6 +1075,17 @@ class uEmuUnicornEngine(object):
             for idx, val in enumerate(cpuContext.items):
                 self.mu.reg_write(reg_map[idx][1], int(val[1], 0))
             self.mu.reg_write(self.uc_reg_pc, pc)
+
+            # enable VFP
+            if UEMU_HELPERS.get_arch() in ["armle", "armbe"]: 
+                if IDAAPI_AskYN(1, "Enable VFP instruction emulation?") == 1:
+                    tmp_val = self.mu.reg_read(UC_ARM_REG_C1_C0_2)
+                    tmp_val = tmp_val | (0xf << 20)
+                    self.mu.reg_write(UC_ARM_REG_C1_C0_2, tmp_val)
+                    enable_vfp = 0x40000000
+                    self.mu.reg_write(UC_ARM_REG_FPEXC, enable_vfp)
+                    uemu_log("VFP enabled")
+
             return True
         else:
             return False
@@ -1085,6 +1104,9 @@ class uEmuUnicornEngine(object):
             return False
 
     def run_from(self, address):
+        self.mu = Uc(self.uc_arch, self.uc_mode)
+        self.mu.hook_add(UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED, self.hook_mem_invalid)
+        self.mu.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE, self.hook_mem_access)
         self.pc = address
 
         try:
@@ -1118,9 +1140,9 @@ class uEmuUnicornEngine(object):
                 lastAddress = endAligned
 
             if self.owner.trace_inst():
-                bytes = IDAAPI_GetBytes(self.pc, 4)
+                bytes = IDAAPI_GetBytes(self.pc, IDAAPI_NextHead(self.pc) - self.pc)
                 bytes_hex = " ".join("{:02X}".format(ord(c)) for c in bytes)
-                uemu_log("* TRACE<I> 0x%X | %16s | %s" % (self.pc, bytes_hex, IDAAPI_GetDisasm(self.pc, 0)))
+                uemu_log("* TRACE<I> 0x%X | %-16s | %s" % (self.pc, bytes_hex, IDAAPI_GetDisasm(self.pc, 0)))
 
             IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_PC)
             self.emuActive = True
@@ -1130,7 +1152,7 @@ class uEmuUnicornEngine(object):
 
     def step_thread_main(self):
         try:
-            self.mu.emu_start(self.pc | 1 if UEMU_HELPERS.is_thumb_ea(self.pc) else self.pc, 4, count=1)
+            self.mu.emu_start(self.pc | 1 if UEMU_HELPERS.is_thumb_ea(self.pc) else self.pc, -1, count=1)
             # vvv Workaround to fix issue when registers are still updated even if emu_stop is called
             if self.fix_context is not None:
                 self.mu.context_restore(self.fix_context)
@@ -1139,9 +1161,9 @@ class uEmuUnicornEngine(object):
             def result_handler():
                 self.pc = self.mu.reg_read(self.uc_reg_pc)
                 if self.owner.trace_inst():
-                    bytes = IDAAPI_GetBytes(self.pc, 4)
+                    bytes = IDAAPI_GetBytes(self.pc, IDAAPI_NextHead(self.pc) - self.pc)
                     bytes_hex = " ".join("{:02X}".format(ord(c)) for c in bytes)
-                    uemu_log("* TRACE<I> 0x%X | %16s | %s" % (self.pc, bytes_hex, IDAAPI_GetDisasm(self.pc, 0)))
+                    uemu_log("* TRACE<I> 0x%X | %-16s | %s" % (self.pc, bytes_hex, IDAAPI_GetDisasm(self.pc, 0)))
 
                 if not IDAAPI_IsCode(IDAAPI_GetFlags(self.pc)) and self.owner.force_code():
                     uemu_log("Creating code at 0x%X" % (self.pc))
@@ -1236,8 +1258,8 @@ class uEmuUnicornEngine(object):
         self.emuRunning = False
 
     def is_breakpoint_reached(self, address):
-        for idx in range(GetBptQty()):
-            if GetBptEA(idx) == address and GetBptAttr(address, BPTATTR_FLAGS) & BPT_ENABLED:
+        for idx in range(IDAAPI_GetBptQty()):
+            if IDAAPI_GetBptEA(idx) == address and IDAAPI_GetBptAttr(address, BPTATTR_FLAGS) & BPT_ENABLED:
                 return True
         return False
 
@@ -1250,6 +1272,7 @@ class uEmuUnicornEngine(object):
 
         IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_Reset)    
         self.pc = BADADDR
+        self.mu = None
         self.emuActive = False
 
 # === uEmuPlugin
@@ -1325,13 +1348,13 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         self.unicornEngine = uEmuUnicornEngine(self)
 
     def follow_pc(self):
-        return self.settings["follow_pc"];
+        return self.settings["follow_pc"]
 
     def force_code(self):
-        return self.settings["force_code"];
+        return self.settings["force_code"]
 
     def trace_inst(self):
-        return self.settings["trace_inst"];
+        return self.settings["trace_inst"]
 
     def load_project(self):
         filePath = IDAAPI_AskFile(0, "*.emu", "Open eEmu project")
@@ -1460,38 +1483,38 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def emu_start(self):
         if self.unicornEngine.is_active():
-            uemu_log("Emulator is already active");
+            uemu_log("Emulator is already active")
             return
 
         if self.unicornEngine.is_running():
-            uemu_log("Emulator is running");
+            uemu_log("Emulator is running")
             return
 
-        uemu_log("Emulation started")
         self.unicornEngine.run_from(IDAAPI_ScreenEA())
+        uemu_log("Emulation started")
 
     def emu_run(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         if self.unicornEngine.is_running():
-            uemu_log("Emulator is running");
+            uemu_log("Emulator is running")
             return
 
         self.unicornEngine.run()
 
     def emu_step(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         if self.unicornEngine.is_running():
-            uemu_log("Emulator is running");
+            uemu_log("Emulator is running")
             return
         count = 1
         if UEMU_HELPERS.is_alt_pressed():
-            count = AskLong(1, "Enter Step Count")
+            count = IDAAPI_AskLong(1, "Enter Step Count")
             if count is None or count < 0: 
                 return
             if count == 0: 
@@ -1501,18 +1524,18 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def emu_stop(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         if not self.unicornEngine.is_running():
-            uemu_log("Emulator is not running");
+            uemu_log("Emulator is not running")
             return
 
         self.unicornEngine.interrupt()
 
     def emu_reset(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
         
         self.unicornEngine.reset()
@@ -1524,22 +1547,22 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def jump_to_pc(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         if self.unicornEngine.is_running():
-            uemu_log("Emulator is running");
+            uemu_log("Emulator is running")
             return
 
         self.unicornEngine.jump_to_pc()
 
     def change_cpu_context(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         if self.unicornEngine.is_running():
-            uemu_log("Emulator is running");
+            uemu_log("Emulator is running")
             return
 
         self.unicornEngine.set_cpu_context()
@@ -1553,7 +1576,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def show_cpu_context(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         if self.cpuContextView is None:
@@ -1565,7 +1588,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def show_memory(self, address = 0, size = 16):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         memRangeDlg = uEmuMemoryRangeDialog()
@@ -1597,7 +1620,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def show_mapped(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         mappeduEmuMemoryView = uEmuMappeduMemoryView(self, self.unicornEngine.get_mapped_memory())
@@ -1605,11 +1628,11 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def fetch_segments(self):
         if not self.unicornEngine.is_active():
-            uemu_log("Emulator is not active");
+            uemu_log("Emulator is not active")
             return
 
         if self.unicornEngine.is_running():
-            uemu_log("Emulator is running");
+            uemu_log("Emulator is running")
             return
 
         self.unicornEngine.fetch_segments()
