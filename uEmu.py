@@ -455,7 +455,7 @@ class uEmuCpuContextView(simplecustviewer_t):
             self.menu_cols3 = 3
             self.menu_update = 4
 
-            class Hooks(idaapi.UI_Hooks):
+            class Hooks(UI_Hooks):
 
                 class PopupActionHandler(action_handler_t):
                     def __init__(self, owner, menu_id):
@@ -467,10 +467,10 @@ class uEmuCpuContextView(simplecustviewer_t):
                         self.owner.OnPopupMenu(self.menu_id)
 
                     def update(self, ctx):
-                        return idaapi.AST_ENABLE_ALWAYS
+                        return AST_ENABLE_ALWAYS
 
                 def __init__(self, form):
-                    idaapi.UI_Hooks.__init__(self)
+                    UI_Hooks.__init__(self)
                     self.form = form
 
                 def finish_populating_widget_popup(self, widget, popup):
