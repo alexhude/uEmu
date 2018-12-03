@@ -392,14 +392,16 @@ class UEMU_HELPERS:
 
     @staticmethod
     def is_thumb_ea(ea):
-        if ph.id == PLFM_ARM and not ph.flag & PR_USE64:
-            if IDA_SDK_VERSION >= 700:
-                t = get_sreg(ea, "T") # get T flag
+        def handler():
+            if ph.id == PLFM_ARM and not ph.flag & PR_USE64:
+                if IDA_SDK_VERSION >= 700:
+                    t = get_sreg(ea, "T") # get T flag
+                else:
+                    t = get_segreg(ea, 20) # get T flag
+                return t is not BADSEL and t is not 0
             else:
-                t = get_segreg(ea, 20) # get T flag
-            return t is not BADSEL and t is not 0
-        else:
-            return False
+                return False
+        return execute_sync(uEmuOnMainCallable(handler), MFF_READ)
 
     @staticmethod
     def trim_spaces(string):
@@ -455,7 +457,7 @@ class uEmuCpuContextView(simplecustviewer_t):
             self.menu_cols3 = 3
             self.menu_update = 4
 
-            class Hooks(idaapi.UI_Hooks):
+            class Hooks(UI_Hooks):
 
                 class PopupActionHandler(action_handler_t):
                     def __init__(self, owner, menu_id):
@@ -467,10 +469,10 @@ class uEmuCpuContextView(simplecustviewer_t):
                         self.owner.OnPopupMenu(self.menu_id)
 
                     def update(self, ctx):
-                        return idaapi.AST_ENABLE_ALWAYS
+                        return AST_ENABLE_ALWAYS
 
                 def __init__(self, form):
-                    idaapi.UI_Hooks.__init__(self)
+                    UI_Hooks.__init__(self)
                     self.form = form
 
                 def finish_populating_widget_popup(self, widget, popup):
@@ -786,11 +788,11 @@ class uEmuMappeduMemoryView(IDAAPI_Choose):
     def show(self):
         return self.Show(True) >= 0
 
-class uEmuStepResultCallable(object):
+class uEmuOnMainCallable(object):
     def __init__(self, handler):
         self.handler = handler
     def __call__(self):
-        self.handler()
+        return self.handler()
 
 # === Settings
 
@@ -1166,7 +1168,9 @@ class uEmuUnicornEngine(object):
         return self.mu.mem_read(address, size)
 
     def hook_mem_access(self, uc, access, address, size, value, user_data):
-        if self.is_breakpoint_reached(address):
+        def bpt_sync_check():
+            return self.is_breakpoint_reached(address)
+        if execute_sync(uEmuOnMainCallable(bpt_sync_check), MFF_READ):
             # vvv Workaround to fix issue when register are still updated even if emu_stop is called
             self.fix_context = self.mu.context_save()
             # ^^^
@@ -1181,8 +1185,9 @@ class uEmuUnicornEngine(object):
                     self.jump_to_pc()
 
                 self.emuStepCount = 1
+                return True
 
-            execute_sync(uEmuStepResultCallable(result_handler), MFF_FAST)
+            execute_sync(uEmuOnMainCallable(result_handler), MFF_WRITE)
 
     def hook_mem_invalid(self, uc, access, address, size, value, user_data):
         def result_handler():
@@ -1198,8 +1203,9 @@ class uEmuUnicornEngine(object):
                 else:
                     self.interrupt()
                     break
+            return True
 
-        execute_sync(uEmuStepResultCallable(result_handler), MFF_FAST)
+        execute_sync(uEmuOnMainCallable(result_handler), MFF_WRITE)
         return True
 
     def init_cpu_context(self, pc):
@@ -1354,8 +1360,9 @@ class uEmuUnicornEngine(object):
 
                 self.emuStepCount = 1
                 self.emuRunning = False
+                return True
 
-            execute_sync(uEmuStepResultCallable(result_handler), MFF_FAST)
+            execute_sync(uEmuOnMainCallable(result_handler), MFF_WRITE)
 
         except UcError as e:
 
@@ -1397,8 +1404,9 @@ class uEmuUnicornEngine(object):
 
                 self.emuStepCount = 1
                 self.emuRunning = False
+                return True
 
-            execute_sync(uEmuStepResultCallable(result_handler), MFF_FAST)
+            execute_sync(uEmuOnMainCallable(result_handler), MFF_WRITE)
 
     def step(self, count=1):
         self.emuStepCount = count
