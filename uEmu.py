@@ -1266,6 +1266,9 @@ class uEmuUnicornEngine(object):
             if self.extended:
                 for idx, val in enumerate(cpuContext.items[regs_len:]):
                     self.mu.reg_write(reg_ext_map[idx][1], int(val[1], 0))
+            IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_Reset)
+            self.pc = self.mu.reg_read(self.uc_reg_pc)
+            IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_PC)
             return True
         else:
             return False
