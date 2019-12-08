@@ -8,9 +8,6 @@
 
 UEMU_USE_AS_SCRIPT      = True    # Set to `False` if you want to load uEmu automatically as IDA Plugin
 
-UEMU_PLUGIN_NAME        = "uEmu"
-UEMU_PLUGIN_MENU_NAME   = "uEmu"
-
 # === Import
 
 import pickle
@@ -44,7 +41,7 @@ if IDA_SDK_VERSION >= 700:
     IDAAPI_AskFile      = ask_file
     IDAAPI_AskLong      = ask_long
     IDAAPI_NextHead     = next_head
-    IDAAPI_GetDisasm    = generate_disasm_line
+    IDAAPI_GetDisasm    = lambda a, b: tag_remove(generate_disasm_line(a, b))
     IDAAPI_NextThat     = next_that
     IDAAPI_Jump         = jumpto
     # classes
@@ -118,16 +115,26 @@ class UEMU_HELPERS:
         def update(self, ctx):
             return AST_ENABLE_ALWAYS
 
+    # IDA
+
+    @staticmethod
+    def exec_on_main(callable, dbflag):
+        res = execute_sync(callable, dbflag)
+        if res == -1:
+            uemu_log("! <C> execute_sync(%s) failed" % (str(callable)))
+            return False
+        return True if res == 1 else False
+
     # Others
 
     @staticmethod
     def ALIGN_PAGE_DOWN(x):
         return x & ~(UEMU_CONFIG.UnicornPageSize - 1)
-        
+
     @staticmethod
     def ALIGN_PAGE_UP(x):
         return (x + UEMU_CONFIG.UnicornPageSize - 1) & ~(UEMU_CONFIG.UnicornPageSize-1)
-    
+
     @staticmethod
     def inf_is_be():
         if IDA_SDK_VERSION >= 700:
@@ -297,7 +304,7 @@ class UEMU_HELPERS:
                 [ "pc",     UC_MIPS_REG_PC  ],
             ]
         }
-        return registers[arch]  
+        return registers[arch]
 
     @staticmethod
     def get_register_bits(arch):
@@ -310,12 +317,12 @@ class UEMU_HELPERS:
 
         registers_bits = {
             "x64"   : 64,
-            "x86"   : 32,        
+            "x86"   : 32,
             "arm"   : 32,
             "arm64" : 64,
             "mips"  : 32
         }
-        return registers_bits[arch]  
+        return registers_bits[arch]
 
     @staticmethod
     def get_register_ext_map(arch):
@@ -330,8 +337,40 @@ class UEMU_HELPERS:
             "x64" : [
             ],
             "x86" : [
-            ],        
+            ],
             "arm" : [
+                [ "D0",     UC_ARM_REG_D0  ],
+                [ "D1",     UC_ARM_REG_D1  ],
+                [ "D2",     UC_ARM_REG_D2  ],
+                [ "D3",     UC_ARM_REG_D3  ],
+                [ "D4",     UC_ARM_REG_D4  ],
+                [ "D5",     UC_ARM_REG_D5  ],
+                [ "D6",     UC_ARM_REG_D6  ],
+                [ "D7",     UC_ARM_REG_D7  ],
+                [ "D8",     UC_ARM_REG_D8  ],
+                [ "D9",     UC_ARM_REG_D9  ],
+                [ "D10",    UC_ARM_REG_D10 ],
+                [ "D11",    UC_ARM_REG_D11 ],
+                [ "D12",    UC_ARM_REG_D12 ],
+                [ "D13",    UC_ARM_REG_D13 ],
+                [ "D14",    UC_ARM_REG_D14 ],
+                [ "D15",    UC_ARM_REG_D15 ],
+                [ "D16",    UC_ARM_REG_D16 ],
+                [ "D17",    UC_ARM_REG_D17 ],
+                [ "D18",    UC_ARM_REG_D18 ],
+                [ "D19",    UC_ARM_REG_D19 ],
+                [ "D20",    UC_ARM_REG_D20 ],
+                [ "D21",    UC_ARM_REG_D21 ],
+                [ "D22",    UC_ARM_REG_D22 ],
+                [ "D23",    UC_ARM_REG_D23 ],
+                [ "D24",    UC_ARM_REG_D24 ],
+                [ "D25",    UC_ARM_REG_D25 ],
+                [ "D26",    UC_ARM_REG_D26 ],
+                [ "D27",    UC_ARM_REG_D27 ],
+                [ "D28",    UC_ARM_REG_D28 ],
+                [ "D29",    UC_ARM_REG_D29 ],
+                [ "D30",    UC_ARM_REG_D30 ],
+                [ "D31",    UC_ARM_REG_D31 ],
             ],
             "arm64" : [
                 [ "Q0",     UC_ARM64_REG_Q0  ],
@@ -368,9 +407,9 @@ class UEMU_HELPERS:
                 [ "Q31",    UC_ARM64_REG_Q31 ],
             ],
             "mips" : [
-            ]            
+            ]
         }
-        return registers_ext[arch]  
+        return registers_ext[arch]
 
     @staticmethod
     def get_register_ext_bits(arch):
@@ -383,29 +422,51 @@ class UEMU_HELPERS:
 
         registers_ext_bits = {
             "x64"   : 0,
-            "x86"   : 0,        
-            "arm"   : 0,
+            "x86"   : 0,
+            "arm"   : 64,
             "arm64" : 128,
             "mips"  : 0
         }
-        return registers_ext_bits[arch]  
+        return registers_ext_bits[arch]
+
+    @staticmethod
+    def get_register_ext_format(arch):
+        if arch.startswith("arm64"):
+            arch = "arm64"
+        elif arch.startswith("arm"):
+            arch = "arm"
+        elif arch.startswith("mips"):
+            arch = "mips"
+
+        registers_ext_format = {
+            "x64"   : "",
+            "x86"   : "",
+            "arm"   : "0x%.16X",
+            "arm64" : "0x%.32X",
+            "mips"  : 0
+        }
+        return registers_ext_format[arch]
 
     @staticmethod
     def is_thumb_ea(ea):
         def handler():
             if ph.id == PLFM_ARM and not ph.flag & PR_USE64:
                 if IDA_SDK_VERSION >= 700:
-                    t = get_sreg(ea, "T") # get T flag
+                    t = get_sreg(ea, "T")  # get T flag
                 else:
                     t = get_segreg(ea, 20) # get T flag
                 return t is not BADSEL and t is not 0
             else:
-                return False
-        return execute_sync(uEmuOnMainCallable(handler), MFF_READ)
+                return 0
+        return UEMU_HELPERS.exec_on_main(handler, MFF_READ)
 
     @staticmethod
     def trim_spaces(string):
         return ' '.join(str(string).split())
+
+    @staticmethod
+    def bytes_to_str(bytes):
+        return " ".join("{:02X}".format(ord(c) if type(c) is str else c) for c in bytes)
 
     @staticmethod
     def is_alt_pressed():
@@ -422,8 +483,8 @@ class UEMU_HELPERS:
         def __call__(self, flags):
             return not IDAAPI_HasValue(flags)
 
-def uemu_log(entry):
-    msg("[" + UEMU_PLUGIN_NAME + "]: " + entry + "\n")
+def uemu_log(entry, name="uEmu"):
+    msg("[" + name + "]: " + entry + "\n")
 
 # === uEmuInitView
 
@@ -484,9 +545,9 @@ class uEmuCpuContextView(simplecustviewer_t):
                         attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "Change Context", self.PopupActionHandler(self.form, self.form.menu_update),  None, None, -1))
                         attach_action_to_popup(widget, popup, "-", None)
 
-            if self.hooks == None:
+            if self.hooks is None:
                 self.hooks = Hooks(self)
-                self.hooks.hook()            
+                self.hooks.hook()
         else:
             self.menu_cols1 = self.AddPopupMenu("1 Column")
             self.menu_cols2 = self.AddPopupMenu("2 Columns")
@@ -542,14 +603,14 @@ class uEmuCpuContextView(simplecustviewer_t):
         else:
             regList = UEMU_HELPERS.get_register_map(arch)
         reg_cnt = len(regList)
-        lines = reg_cnt/cols if reg_cnt%cols==0 else (reg_cnt/cols) + 1
+        lines = int(reg_cnt / cols) if reg_cnt % cols == 0 else (reg_cnt / cols) + 1
         line = ""
         for i in range(lines):
             if i != 0:
                 self.AddLine(line)
                 line = ""
 
-            for j in xrange(i, reg_cnt, lines):
+            for j in range(i, reg_cnt, lines):
                 reg_label = regList[j][0]
                 reg_key = regList[j][1]
 
@@ -560,13 +621,13 @@ class uEmuCpuContextView(simplecustviewer_t):
                 else:
                     currentValue = self.lastContext[reg_label]
 
-                if ph.flag & PR_USE64:
-                    if self.extended:
-                        value_format = "0x%.32X"
-                    else:
-                        value_format = "0x%.16X"
+                if self.extended:
+                    value_format = UEMU_HELPERS.get_register_ext_format(arch)
                 else:
-                    value_format = "0x%.8X"
+                    if ph.flag & PR_USE64:
+                        value_format = "0x%.16X"
+                    else:
+                        value_format = "0x%.8X"
 
                 if reg_label in self.lastContext:
                     if self.lastContext[reg_label] != currentValue:
@@ -578,7 +639,7 @@ class uEmuCpuContextView(simplecustviewer_t):
 
                 self.lastContext[reg_label] = currentValue
 
-                line = line.ljust(35 * ((j/lines) + 1))
+                line = line.ljust(35 * (int(j/lines) + 1))
 
         self.AddLine(line)
 
@@ -635,7 +696,10 @@ class uEmuMemoryView(simplecustviewer_t):
         if context is None:
             return
 
-        memory = context.mem_read(self.address, self.size)
+        try:
+            memory = context.mem_read(self.address, self.size)
+        except UcError:
+            return
 
         size = len(memory)
 
@@ -715,7 +779,7 @@ class uEmuControlView(PluginForm):
         hbox.addWidget(btnStep)
         hbox.addWidget(btnStop)
 
-        self.parent.setLayout(hbox) 
+        self.parent.setLayout(hbox)
 
     def OnEmuStart(self, code=0):
         self.owner.emu_start()
@@ -772,14 +836,14 @@ class uEmuMappeduMemoryView(IDAAPI_Choose):
         self.owner.show_memory(address, size)
 
     def OnGetLine(self, n):
-        return [ 
-            "0x%X" % self.items[n][0], 
-            "0x%X" % self.items[n][1], 
+        return [
+            "0x%X" % self.items[n][0],
+            "0x%X" % self.items[n][1],
             "%c%c%c" % (
                 "r" if self.items[n][2] & UC_PROT_READ else "-",
                 "w" if self.items[n][2] & UC_PROT_WRITE else "-",
                 "x" if self.items[n][2] & UC_PROT_EXEC else "-")
-        ] 
+        ]
 
     def OnGetSize(self):
         n = len(self.items)
@@ -787,12 +851,6 @@ class uEmuMappeduMemoryView(IDAAPI_Choose):
 
     def show(self):
         return self.Show(True) >= 0
-
-class uEmuOnMainCallable(object):
-    def __init__(self, handler):
-        self.handler = handler
-    def __call__(self):
-        return self.handler()
 
 # === Settings
 
@@ -824,7 +882,7 @@ Register Value
         'reg_val': Form.NumericInput(tp=Form.FT_HEX, swidth=20)
         })
 
-class uEmuRegisterValue128Dialog(Form):
+class uEmuRegisterValueLHDialog(Form):
     def __init__(self, regName):
         Form.__init__(self, r"""STARTITEM {id:reg_valh}
 BUTTON YES* Save
@@ -909,14 +967,16 @@ class uEmuContextInitDialog(IDAAPI_Choose):
         return n
 
     def OnEditLine(self, n):
-        if self.items[n][2] == 128:
-            regDlg = uEmuRegisterValue128Dialog(self.items[n][0])
+        bits = self.items[n][2]
+        ext = self.items[n][3]
+        if ext:
+            regDlg = uEmuRegisterValueLHDialog(self.items[n][0])
             regDlg.Compile()
-            regDlg.reg_valh.value = int(self.items[n][1], 0) >> 64
+            regDlg.reg_valh.value = int(self.items[n][1], 0) >> (bits >> 1)
             regDlg.reg_vall.value = int(self.items[n][1], 0)
             ok = regDlg.Execute()
             if ok == 1:
-                newValue = (regDlg.reg_valh.value << 64) | regDlg.reg_vall.value
+                newValue = (regDlg.reg_valh.value << (bits >> 1)) | regDlg.reg_vall.value
                 self.items[n][1] = "0x%X" % newValue
         else:
             regDlg = uEmuRegisterValueDialog(self.items[n][0])
@@ -929,7 +989,7 @@ class uEmuContextInitDialog(IDAAPI_Choose):
         self.Refresh()
 
     def OnGetLine(self, n):
-        return [ self.items[n][0], self.items[n][1] ] 
+        return [ self.items[n][0], self.items[n][1] ]
 
     def OnGetSize(self):
         n = len(self.items)
@@ -971,9 +1031,7 @@ class uEmuUnicornEngine(object):
         }
         arch = UEMU_HELPERS.get_arch()
 
-        self.uc_reg_pc = uc_setup[arch][0]
-        self.uc_arch = uc_setup[arch][1]
-        self.uc_mode = uc_setup[arch][2]
+        self.uc_reg_pc, self.uc_arch, self.uc_mode = uc_setup[arch]
         uemu_log("Unicorn version [ %s ]" % (unicorn.__version__))
         uemu_log("CPU arch set to [ %s ]" % (arch))
 
@@ -1023,9 +1081,7 @@ class uEmuUnicornEngine(object):
 
         if not self.emuActive:
             if self.owner.trace_inst():
-                bytes = IDAAPI_GetBytes(self.pc, IDAAPI_NextHead(self.pc) - self.pc)
-                bytes_hex = " ".join("{:02X}".format(ord(c)) for c in bytes)
-                uemu_log("* TRACE<I> 0x%X | %-16s | %s" % (self.pc, bytes_hex, IDAAPI_GetDisasm(self.pc, 0)))
+                self.trace_log()
 
             self.emuActive = True
 
@@ -1056,7 +1112,7 @@ class uEmuUnicornEngine(object):
 
     def map_empty(self, address, size):
         self.map_memory(address, size)
-        self.mu.mem_write(UEMU_HELPERS.ALIGN_PAGE_DOWN(address), "\x00" * UEMU_CONFIG.UnicornPageSize)
+        self.mu.mem_write(UEMU_HELPERS.ALIGN_PAGE_DOWN(address), b"\x00" * UEMU_CONFIG.UnicornPageSize)
 
     def map_binary(self, address, size):
         binMapDlg = uEmuMapBinaryFileDialog(address)
@@ -1106,7 +1162,7 @@ class uEmuUnicornEngine(object):
             find_inited = False
         else:
             find_inited = True
-        ptr = IDAAPI_NextThat(start, -1, UEMU_HELPERS.InitedCallable() if find_inited else UEMU_HELPERS.UninitedCallable())
+        ptr = IDAAPI_NextThat(start, end, UEMU_HELPERS.InitedCallable() if find_inited else UEMU_HELPERS.UninitedCallable())
         while ptr < end:
             if not find_inited:
                 # found uninitialized
@@ -1119,7 +1175,7 @@ class uEmuUnicornEngine(object):
                 start = ptr
 
             find_inited = not find_inited
-            ptr = IDAAPI_NextThat(ptr, -1, UEMU_HELPERS.InitedCallable() if find_inited else UEMU_HELPERS.UninitedCallable())
+            ptr = IDAAPI_NextThat(ptr, end, UEMU_HELPERS.InitedCallable() if find_inited else UEMU_HELPERS.UninitedCallable())
         # process tail if any
         if not find_inited:
             tmp_end = end if ptr > end else ptr
@@ -1127,7 +1183,7 @@ class uEmuUnicornEngine(object):
             self.mu.mem_write(start, IDAAPI_GetBytes(start, tmp_end - start))
 
     def fetch_segments(self):
-        uemu_log("Fetching segments...")        
+        uemu_log("Fetching segments...")
         for segEA in Segments():
             segStart = IDAAPI_SegStart(segEA)
             segEnd = IDAAPI_SegEnd(segEA)
@@ -1167,10 +1223,16 @@ class uEmuUnicornEngine(object):
     def get_mapped_bytes(self, address, size):
         return self.mu.mem_read(address, size)
 
+    def trace_log(self):
+        bytes = IDAAPI_GetBytes(self.pc, IDAAPI_NextHead(self.pc) - self.pc)
+        bytes_hex = UEMU_HELPERS.bytes_to_str(bytes)
+        uemu_log("* TRACE<I> 0x%X | %-16s | %s" % (self.pc, bytes_hex, IDAAPI_GetDisasm(self.pc, 0)))
+
     def hook_mem_access(self, uc, access, address, size, value, user_data):
         def bpt_sync_check():
-            return self.is_breakpoint_reached(address)
-        if execute_sync(uEmuOnMainCallable(bpt_sync_check), MFF_READ):
+            return 1 if self.is_breakpoint_reached(address) else 0
+        
+        if UEMU_HELPERS.exec_on_main(bpt_sync_check, MFF_READ):
             # vvv Workaround to fix issue when register are still updated even if emu_stop is called
             self.fix_context = self.mu.context_save()
             # ^^^
@@ -1185,9 +1247,9 @@ class uEmuUnicornEngine(object):
                     self.jump_to_pc()
 
                 self.emuStepCount = 1
-                return True
+                return 1
 
-            execute_sync(uEmuOnMainCallable(result_handler), MFF_WRITE)
+            UEMU_HELPERS.exec_on_main(result_handler, MFF_WRITE)
 
     def hook_mem_invalid(self, uc, access, address, size, value, user_data):
         def result_handler():
@@ -1203,16 +1265,16 @@ class uEmuUnicornEngine(object):
                 else:
                     self.interrupt()
                     break
-            return True
+            return 1
 
-        execute_sync(uEmuOnMainCallable(result_handler), MFF_WRITE)
-        return True
+        UEMU_HELPERS.exec_on_main(result_handler, MFF_WRITE)
+        return 1
 
     def init_cpu_context(self, pc):
         self.extended = False
         
         # enable ARMv7 VFP
-        if UEMU_HELPERS.get_arch() in ["armle", "armbe"]: 
+        if UEMU_HELPERS.get_arch() in ["armle", "armbe"]:
             if IDAAPI_AskYN(1, "Enable VFP instruction emulation?") == 1:
                 tmp_val = self.mu.reg_read(UC_ARM_REG_C1_C0_2)
                 tmp_val = tmp_val | (0xf << 20)
@@ -1222,7 +1284,7 @@ class uEmuUnicornEngine(object):
                 self.extended = True
                 uemu_log("VFP enabled")
         # enable ARMv8 FP/SIMD
-        if UEMU_HELPERS.get_arch() in ["arm64le", "arm64be"]: 
+        if UEMU_HELPERS.get_arch() in ["arm64le", "arm64be"]:
             if IDAAPI_AskYN(1, "Enable FP/SIMD instruction emulation?") == 1:
                 cpacr = self.mu.reg_read(UC_ARM64_REG_CPACR_EL1)
                 cpacr = cpacr | (0x3 << 20)
@@ -1231,11 +1293,11 @@ class uEmuUnicornEngine(object):
                 uemu_log("FP/SIMD enabled")
 
         reg_map = UEMU_HELPERS.get_register_map(UEMU_HELPERS.get_arch())
-        regs = [ [ row[0], "0x0", UEMU_HELPERS.get_register_bits(UEMU_HELPERS.get_arch()) ] for row in reg_map ]
+        regs = [ [ row[0], "0x0", UEMU_HELPERS.get_register_bits(UEMU_HELPERS.get_arch()), False ] for row in reg_map ]
         regs_len = len(regs)
         if self.extended:
             reg_ext_map = UEMU_HELPERS.get_register_ext_map(UEMU_HELPERS.get_arch())
-            regs = regs + [ [ row[0], "0x0", UEMU_HELPERS.get_register_ext_bits(UEMU_HELPERS.get_arch()) ] for row in reg_ext_map ]
+            regs = regs + [ [ row[0], "0x0", UEMU_HELPERS.get_register_ext_bits(UEMU_HELPERS.get_arch()), True ] for row in reg_ext_map ]
 
         cpuContext = uEmuContextInitDialog(regs)
         ok = cpuContext.show()
@@ -1252,11 +1314,11 @@ class uEmuUnicornEngine(object):
 
     def set_cpu_context(self):
         reg_map = UEMU_HELPERS.get_register_map(UEMU_HELPERS.get_arch())
-        regs = [ [ row[0], "0x%X" % self.mu.reg_read(row[1]), UEMU_HELPERS.get_register_bits(UEMU_HELPERS.get_arch()) ] for row in reg_map ]
+        regs = [ [ row[0], "0x%X" % self.mu.reg_read(row[1]), UEMU_HELPERS.get_register_bits(UEMU_HELPERS.get_arch()), False ] for row in reg_map ]
         regs_len = len(regs)
         if self.extended:
             reg_ext_map = UEMU_HELPERS.get_register_ext_map(UEMU_HELPERS.get_arch())
-            regs = regs + [ [ row[0], "0x%X" % self.mu.reg_read(row[1]), UEMU_HELPERS.get_register_ext_bits(UEMU_HELPERS.get_arch()) ] for row in reg_ext_map ]
+            regs = regs + [ [ row[0], "0x%X" % self.mu.reg_read(row[1]), UEMU_HELPERS.get_register_ext_bits(UEMU_HELPERS.get_arch()), True ] for row in reg_ext_map ]
 
         cpuContext = uEmuContextInitDialog(regs)
         ok = cpuContext.show()
@@ -1302,14 +1364,12 @@ class uEmuUnicornEngine(object):
                     self.map_memory(segStart, endAligned - segStart)
 
                 # copy initialized bytes
-                self.copy_inited_data(segStart, segEnd)                
+                self.copy_inited_data(segStart, segEnd)
 
                 lastAddress = endAligned
 
             if self.owner.trace_inst():
-                bytes = IDAAPI_GetBytes(self.pc, IDAAPI_NextHead(self.pc) - self.pc)
-                bytes_hex = " ".join("{:02X}".format(ord(c)) for c in bytes)
-                uemu_log("* TRACE<I> 0x%X | %-16s | %s" % (self.pc, bytes_hex, IDAAPI_GetDisasm(self.pc, 0)))
+                self.trace_log()
 
             IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_PC)
             self.emuActive = True
@@ -1320,6 +1380,7 @@ class uEmuUnicornEngine(object):
     def step_thread_main(self):
         try:
             self.mu.emu_start(self.pc | 1 if UEMU_HELPERS.is_thumb_ea(self.pc) else self.pc, -1, count=1)
+
             # vvv Workaround to fix issue when registers are still updated even if emu_stop is called
             if self.fix_context is not None:
                 self.mu.context_restore(self.fix_context)
@@ -1328,9 +1389,7 @@ class uEmuUnicornEngine(object):
             def result_handler():
                 self.pc = self.mu.reg_read(self.uc_reg_pc)
                 if self.owner.trace_inst():
-                    bytes = IDAAPI_GetBytes(self.pc, IDAAPI_NextHead(self.pc) - self.pc)
-                    bytes_hex = " ".join("{:02X}".format(ord(c)) for c in bytes)
-                    uemu_log("* TRACE<I> 0x%X | %-16s | %s" % (self.pc, bytes_hex, IDAAPI_GetDisasm(self.pc, 0)))
+                    self.trace_log()
 
                 if not IDAAPI_IsCode(IDAAPI_GetFlags(self.pc)) and self.owner.force_code():
                     uemu_log("Creating code at 0x%X" % (self.pc))
@@ -1343,7 +1402,7 @@ class uEmuUnicornEngine(object):
                             self.step(self.kStepCount_Run)
                         else:
                             self.step(self.emuStepCount - 1)
-                        return
+                        return 1
                     else:
                         uemu_log("Breakpoint reached at 0x%X : %s" % (self.pc, UEMU_HELPERS.trim_spaces(IDAAPI_GetDisasm(self.pc, 0))))
 
@@ -1360,9 +1419,9 @@ class uEmuUnicornEngine(object):
 
                 self.emuStepCount = 1
                 self.emuRunning = False
-                return True
+                return 1
 
-            execute_sync(uEmuOnMainCallable(result_handler), MFF_WRITE)
+            UEMU_HELPERS.exec_on_main(result_handler, MFF_WRITE)
 
         except UcError as e:
 
@@ -1376,7 +1435,7 @@ class uEmuUnicornEngine(object):
                             self.jump_to_pc()
 
                         self.emuRunning = False
-                        return
+                        return 1
 
                     self.pc = IDAAPI_NextHead(self.pc)
                     uemu_log("! <U> Unable to emulate [ %s ] - SKIP to 0x%X" % (disasm, self.pc))
@@ -1387,7 +1446,7 @@ class uEmuUnicornEngine(object):
                             self.step(self.kStepCount_Run)
                         else:
                             self.step(self.emuStepCount - 1)
-                        return
+                        return 1
                     else:
                         uemu_log("Breakpoint reached at 0x%X : %s" % (self.pc, UEMU_HELPERS.trim_spaces(IDAAPI_GetDisasm(self.pc, 0))))
 
@@ -1404,9 +1463,9 @@ class uEmuUnicornEngine(object):
 
                 self.emuStepCount = 1
                 self.emuRunning = False
-                return True
+                return 1
 
-            execute_sync(uEmuOnMainCallable(result_handler), MFF_WRITE)
+            UEMU_HELPERS.exec_on_main(result_handler, MFF_WRITE)
 
     def step(self, count=1):
         self.emuStepCount = count
@@ -1439,7 +1498,7 @@ class uEmuUnicornEngine(object):
             uemu_log("  unmap [%X:%X]" % (start, end))
             self.mu.mem_unmap(start, end - start + 1)
 
-        IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_Reset)    
+        IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_Reset)
         self.pc = BADADDR
         self.mu = None
         self.emuActive = False
@@ -1454,7 +1513,8 @@ class uEmuPlugin(plugin_t, UI_Hooks):
     comment = ""
 
     help = "Tiny cute emulator"
-    wanted_name = UEMU_PLUGIN_MENU_NAME
+    wanted_name = "uEmu"
+    plugin_name = "uEmu"
     wanted_hotkey = ""
 
     # --- PLUGIN DATA
@@ -1473,19 +1533,24 @@ class uEmuPlugin(plugin_t, UI_Hooks):
     cpuExtContextView = None
     memoryViews = {}
 
-    # --- PLUGIN LIFECYCLE 
+    # --- PLUGIN LIFECYCLE
+
+    def __init__(self, name = "uEmu"):
+        super(uEmuPlugin, self).__init__()
+        self.plugin_name = name
+        self.wanted_name = name
+
+        uemu_log("Init plugin %s" % (self.plugin_name))
 
     def init(self):
-        super(uEmuPlugin, self).__init__()
         self.hook_ui_actions()
-        uemu_log("Init plugin")
         return PLUGIN_KEEP
 
     def run(self, arg):
-        uemu_log("Run plugin with (%d)" % arg)
+        uemu_log("Run plugin " + self.plugin_name + " with (%d)" % arg)
 
     def run(self, arg = 0):
-        uemu_log("Run plugin")
+        uemu_log("Run plugin " + self.plugin_name)
         self.register_menu_actions()
         self.attach_main_menu_actions()
         self.unicornEngine = uEmuUnicornEngine(self)
@@ -1565,27 +1630,27 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         [x.handler() for x in self.MENU_ITEMS if x.action == action]
 
     def register_menu_actions(self):
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(UEMU_PLUGIN_NAME + ":start",             self.emu_start,             "Start",                      "Start emulation",           None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(UEMU_PLUGIN_NAME + ":run",               self.emu_run,               "Run",                        "Run",                       None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(UEMU_PLUGIN_NAME + ":step",              self.emu_step,              "Step",                       "Step to next instruction",  "SHIFT+CTRL+ALT+S",     True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(UEMU_PLUGIN_NAME + ":stop",              self.emu_stop,              "Stop",                       "Stop emulation",            None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(UEMU_PLUGIN_NAME + ":reset",             self.emu_reset,             "Reset",                      "Reset emulation",           None,                   True    ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":start",             self.emu_start,             "Start",                      "Start emulation",           None,                   True    ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":run",               self.emu_run,               "Run",                        "Run",                       None,                   True    ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":step",              self.emu_step,              "Step",                       "Step to next instruction",  "SHIFT+CTRL+ALT+S",     True    ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":stop",              self.emu_stop,              "Stop",                       "Stop emulation",            None,                   True    ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":reset",             self.emu_reset,             "Reset",                      "Reset emulation",           None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,            "",                           None,                        None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(UEMU_PLUGIN_NAME + ":jmp_pc",            self.jump_to_pc,            "Jump to PC",                 "Jump to PC",                "SHIFT+CTRL+ALT+J",     True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(UEMU_PLUGIN_NAME + ":cng_cpu",           self.change_cpu_context,    "Change CPU Context",         "Change CPU Context",        None,                   True    ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":jmp_pc",            self.jump_to_pc,            "Jump to PC",                 "Jump to PC",                "SHIFT+CTRL+ALT+J",     True    ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":cng_cpu",           self.change_cpu_context,    "Change CPU Context",         "Change CPU Context",        None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,            "",                           None,                        None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(UEMU_PLUGIN_NAME + ":ctl_view",          self.show_controls,         "Show Controls",              "Show Control Window",       None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(UEMU_PLUGIN_NAME + ":cpu_view",          self.show_cpu_context,      "Show CPU Context",           "Show CPU Registers",        None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(UEMU_PLUGIN_NAME + ":cpu_ext_view",      self.show_cpu_ext_context,  "Show CPU Extended Context",  "Show Extended Registers",   None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(UEMU_PLUGIN_NAME + ":mem_view",          self.show_memory,           "Show Memory Range",          "Show Memory Range",         None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(UEMU_PLUGIN_NAME + ":mem_map",           self.show_mapped,           "Show Mapped Memory",         "Show Mapped Memory",        None,                   False   ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(UEMU_PLUGIN_NAME + ":fetch_segs",        self.fetch_segments,        "Fetch Segments",             "Fetch Segments",            None,                   False   ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":ctl_view",          self.show_controls,         "Show Controls",              "Show Control Window",       None,                   True    ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":cpu_view",          self.show_cpu_context,      "Show CPU Context",           "Show CPU Registers",        None,                   True    ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":cpu_ext_view",      self.show_cpu_ext_context,  "Show CPU Extended Context",  "Show Extended Registers",   None,                   True    ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":mem_view",          self.show_memory,           "Show Memory Range",          "Show Memory Range",         None,                   True    ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":mem_map",           self.show_mapped,           "Show Mapped Memory",         "Show Mapped Memory",        None,                   False   ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":fetch_segs",        self.fetch_segments,        "Fetch Segments",             "Fetch Segments",            None,                   False   ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,            "",                           None,                        None,                   False   ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(UEMU_PLUGIN_NAME + ":load_prj",          self.load_project,          "Load Project",               "Load Project",              None,                   False   ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(UEMU_PLUGIN_NAME + ":save_prj",          self.save_project,          "Save Project",               "Save Project",              None,                   False   ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(UEMU_PLUGIN_NAME + ":settings",          self.show_settings,         "Settings",                   "Settings",                  None,                   False   ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":load_prj",          self.load_project,          "Load Project",               "Load Project",              None,                   False   ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":save_prj",          self.save_project,          "Save Project",               "Save Project",              None,                   False   ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":settings",          self.show_settings,         "Settings",                   "Settings",                  None,                   False   ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,            "",                           None,                        None,                   False   ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(UEMU_PLUGIN_NAME + ":unload",            self.unload_plugin,         "Unload Plugin",              "Unload Plugin",             None,                   False   ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":unload",            self.unload_plugin,         "Unload Plugin",              "Unload Plugin",             None,                   False   ))
 
         for item in self.MENU_ITEMS:
             if item.action == "-":
@@ -1600,11 +1665,11 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def attach_main_menu_actions(self):
         for item in self.MENU_ITEMS:
-            attach_action_to_menu("Edit/Plugins/" + UEMU_PLUGIN_MENU_NAME + "/" + item.title, item.action, SETMENU_APP)
+            attach_action_to_menu("Edit/Plugins/" + self.plugin_name + "/" + item.title, item.action, SETMENU_APP)
 
     def detach_main_menu_actions(self):
         for item in self.MENU_ITEMS:
-            detach_action_from_menu("Edit/Plugins/" + UEMU_PLUGIN_MENU_NAME + "/" + item.title, item.action)
+            detach_action_from_menu("Edit/Plugins/" + self.plugin_name + "/" + item.title, item.action)
 
     # --- POPUP MENU
 
@@ -1621,14 +1686,14 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         if get_widget_type(widget) == BWN_DISASM:
             for item in self.MENU_ITEMS:
                 if item.popup:
-                    attach_action_to_popup(widget, popup_handle, item.action, UEMU_PLUGIN_MENU_NAME + "/")
+                    attach_action_to_popup(widget, popup_handle, item.action, self.plugin_name + "/")
     
     # IDA 6.x
     def finish_populating_tform_popup(self, form, popup_handle):
         if get_tform_type(form) == BWN_DISASM:
             for item in self.MENU_ITEMS:
                 if item.popup:
-                    attach_action_to_popup(form, popup_handle, item.action, UEMU_PLUGIN_MENU_NAME + "/")
+                    attach_action_to_popup(form, popup_handle, item.action, self.plugin_name + "/")
 
     # --- DELEGATES
 
@@ -1691,9 +1756,9 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         count = 1
         if UEMU_HELPERS.is_alt_pressed():
             count = IDAAPI_AskLong(1, "Enter Step Count")
-            if count is None or count < 0: 
+            if count is None or count < 0:
                 return
-            if count == 0: 
+            if count == 0:
                 count = 1
 
         self.unicornEngine.step(count)
@@ -1769,7 +1834,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
             uemu_log("Emulator is not active")
             return
 
-        if UEMU_HELPERS.get_arch() not in ["arm64le", "arm64be"]:
+        if UEMU_HELPERS.get_arch() not in ["armle", "armbe", "arm64le", "arm64be"]:
             return
 
         if self.cpuExtContextView is None:
@@ -1806,7 +1871,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
                         return
 
                 self.memoryViews[mem_addr] = uEmuMemoryView(self, mem_addr, mem_size)
-                self.memoryViews[mem_addr].Create("uEmu Memory [ " + mem_cmnt + " ]")
+                self.memoryViews[mem_addr].Create("uEmu Memory [ " + mem_cmnt.encode('utf8') + " ]")
                 self.memoryViews[mem_addr].SetContent(self.unicornEngine.mu)
             self.memoryViews[mem_addr].Show()
             self.memoryViews[mem_addr].Refresh()
