@@ -172,6 +172,24 @@ class UEMU_HELPERS:
             return ""
 
     @staticmethod
+    def get_stack_register(arch):
+        if arch.startswith("arm64"):
+            arch = "arm64"
+        elif arch.startswith("arm"):
+            arch = "arm"
+        elif arch.startswith("mips"):
+            arch = "mips"
+
+        registers = {
+            "x64" : ("rsp", UC_X86_REG_RSP),
+            "x86" : ("esp", UC_X86_REG_ESP),
+            "arm" : ("SP", UC_ARM_REG_SP),
+            "arm64" : ("SP", UC_ARM64_REG_SP),
+            "mips" : ("sp", UC_MIPS_REG_29),
+        }
+        return registers[arch]
+
+    @staticmethod
     def get_register_map(arch):
         if arch.startswith("arm64"):
             arch = "arm64"
@@ -750,6 +768,58 @@ class uEmuMemoryView(simplecustviewer_t):
     def OnClose(self):
         self.owner.memory_view_closed(self.viewid)
 
+# === uEmuStackView
+
+class uEmuStackView(simplecustviewer_t):
+
+    stack_prelines = 12
+    stack_postlines = 52
+
+    def __init__(self, owner):
+        super(uEmuStackView, self).__init__()
+        self.owner = owner
+        arch = UEMU_HELPERS.get_arch()
+        _, self.uc_reg_sp = UEMU_HELPERS.get_stack_register(arch)
+
+    def Create(self, title):
+        if not simplecustviewer_t.Create(self, title):
+            return False
+        return True
+
+    def SetContent(self, context):
+
+        self.ClearLines()
+        if context is None:
+            return
+
+        sp = context.reg_read(self.uc_reg_sp)
+
+        self.AddLine('')
+        self.AddLine(COLSTR('  Stack at 0x%X' % sp, SCOLOR_AUTOCMT))
+        self.AddLine('')
+
+        arch = UEMU_HELPERS.get_arch()
+        reg_bit_size = UEMU_HELPERS.get_register_bits(arch)
+        reg_byte_size = reg_bit_size // 8
+        value_format = '% .16X' if reg_bit_size == 64 else '% .8X'
+
+        for i in range(-self.stack_prelines, self.stack_postlines):
+            clr = SCOLOR_DREF if i < 0 else SCOLOR_INSN
+            cur_addr = (sp + i * reg_byte_size)
+            line = ('  ' + value_format + ': ') % cur_addr
+            try:
+                value = context.mem_read(cur_addr, reg_byte_size)
+                value, = struct.unpack('Q' if reg_bit_size == 64 else 'I', value)
+                line += value_format % value
+            except Exception:
+                line += '?' * reg_byte_size * 2
+
+            self.AddLine(COLSTR(line, clr))
+
+
+    def OnClose(self):
+        self.owner.stack_view_closed()
+
 # === uEmuControlView
 
 class uEmuControlView(PluginForm):
@@ -862,9 +932,10 @@ BUTTON CANCEL Cancel
 uEmu Settings
 <Follow PC:{chk_followpc}>
 <Convert to Code automatically:{chk_forcecode}>
-<Trace instructions:{chk_trace}>{emu_group}>
+<Trace instructions:{chk_trace}>
+<Lazy mapping:{chk_lazymapping}>{emu_group}>
 """, {
-        'emu_group': Form.ChkGroupControl(("chk_followpc", "chk_forcecode", "chk_trace")),
+        'emu_group': Form.ChkGroupControl(("chk_followpc", "chk_forcecode", "chk_trace", "chk_lazymapping")),
         })
 
 # === uEmuUnicornEngine
@@ -1254,6 +1325,14 @@ class uEmuUnicornEngine(object):
     def hook_mem_invalid(self, uc, access, address, size, value, user_data):
         def result_handler():
             uemu_log("! <M> Missing memory at 0x%x, data size = %u, data value = 0x%x" %(address, size, value))
+
+            if self.owner.lazy_mapping() and IDAAPI_IsLoaded(address):
+                page_start = UEMU_HELPERS.ALIGN_PAGE_DOWN(address)
+                page_end = UEMU_HELPERS.ALIGN_PAGE_UP(address + size)
+                self.map_memory(page_start, page_end - page_start)
+                self.copy_inited_data(page_start, page_end)
+                return True
+
             while True:
                 ok = IDAAPI_AskYN(1, "Memory [%X] is not mapped!\nDo you want to map it?\n   YES - Load Binary\n   NO - Fill page with zeroes\n   Cancel - Stop Emulation" % (address))
                 if ok == 0:
@@ -1334,7 +1413,7 @@ class uEmuUnicornEngine(object):
 
     def run_from(self, address):
         self.mu = Uc(self.uc_arch, self.uc_mode)
-        self.mu.hook_add(UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED, self.hook_mem_invalid)
+        self.mu.hook_add(UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED | UC_HOOK_MEM_FETCH_UNMAPPED, self.hook_mem_invalid)
         self.mu.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE, self.hook_mem_access)
         self.pc = address
 
@@ -1342,31 +1421,32 @@ class uEmuUnicornEngine(object):
             if self.init_cpu_context(address) == False:
                 return
 
-            uemu_log("Mapping segments...")
+            if not self.owner.lazy_mapping():
+                uemu_log("Mapping segments...")
 
-            # get all segments and merge neighbours
-            lastAddress = BADADDR
-            for segEA in Segments():
-                segStart = IDAAPI_SegStart(segEA)
-                segEnd = IDAAPI_SegEnd(segEA)
-                endAligned = UEMU_HELPERS.ALIGN_PAGE_UP(segEnd)
+                # get all segments and merge neighbours
+                lastAddress = BADADDR
+                for segEA in Segments():
+                    segStart = IDAAPI_SegStart(segEA)
+                    segEnd = IDAAPI_SegEnd(segEA)
+                    endAligned = UEMU_HELPERS.ALIGN_PAGE_UP(segEnd)
 
-                # merge with provious if
-                # - we have mapped some segments already
-                # - aligned old segment is overlapping new segment
-                # otherwise map new
+                    # merge with provious if
+                    # - we have mapped some segments already
+                    # - aligned old segment is overlapping new segment
+                    # otherwise map new
 
-                uemu_log("* seg [%X:%X]" % (segStart, segEnd))
-                if lastAddress != BADADDR and lastAddress > segStart:
-                    if lastAddress < segEnd:
-                        self.map_memory(lastAddress, endAligned - lastAddress)
-                else:
-                    self.map_memory(segStart, endAligned - segStart)
+                    uemu_log("* seg [%X:%X]" % (segStart, segEnd))
+                    if lastAddress != BADADDR and lastAddress > segStart:
+                        if lastAddress < segEnd:
+                            self.map_memory(lastAddress, endAligned - lastAddress)
+                    else:
+                        self.map_memory(segStart, endAligned - segStart)
 
-                # copy initialized bytes
-                self.copy_inited_data(segStart, segEnd)
+                    # copy initialized bytes
+                    self.copy_inited_data(segStart, segEnd)
 
-                lastAddress = endAligned
+                    lastAddress = endAligned
 
             if self.owner.trace_inst():
                 self.trace_log()
@@ -1525,12 +1605,14 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         "follow_pc"     : False,
         "force_code"    : False,
         "trace_inst"    : False,
+        "lazy_mapping"  : False,
     }
 
     controlView = None
     emuInitView = None
     cpuContextView = None
     cpuExtContextView = None
+    stackView = None
     memoryViews = {}
 
     # --- PLUGIN LIFECYCLE
@@ -1591,6 +1673,9 @@ class uEmuPlugin(plugin_t, UI_Hooks):
     def trace_inst(self):
         return self.settings["trace_inst"]
 
+    def lazy_mapping(self):
+        return self.settings["lazy_mapping"]
+
     def load_project(self):
         filePath = IDAAPI_AskFile(0, "*.emu", "Open eEmu project")
         if filePath is None:
@@ -1642,6 +1727,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":ctl_view",          self.show_controls,         "Show Controls",              "Show Control Window",       None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":cpu_view",          self.show_cpu_context,      "Show CPU Context",           "Show CPU Registers",        None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":cpu_ext_view",      self.show_cpu_ext_context,  "Show CPU Extended Context",  "Show Extended Registers",   None,                   True    ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":stack_view",        self.show_stack_view,       "Show Stack View",            "Show Stack View",           None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":mem_view",          self.show_memory,           "Show Memory Range",          "Show Memory Range",         None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":mem_map",           self.show_mapped,           "Show Mapped Memory",         "Show Mapped Memory",        None,                   False   ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":fetch_segs",        self.fetch_segments,        "Fetch Segments",             "Fetch Segments",            None,                   False   ))
@@ -1709,12 +1795,19 @@ class uEmuPlugin(plugin_t, UI_Hooks):
     def memory_view_closed(self, viewid):
         del self.memoryViews[viewid]
 
+    def stack_view_closed(self):
+        self.stackView = None
+
     def update_context(self, address, context):
         # Update CPU Context Views
         if self.cpuContextView is not None:
             self.cpuContextView.SetContent(address, context)
         if self.cpuExtContextView is not None:
             self.cpuExtContextView.SetContent(address, context)
+
+        # Update Stack View
+        if self.stackView is not None:
+            self.stackView.SetContent(context)
 
         # Update Memory Views
         for viewid in self.memoryViews:
@@ -1876,6 +1969,18 @@ class uEmuPlugin(plugin_t, UI_Hooks):
             self.memoryViews[mem_addr].Show()
             self.memoryViews[mem_addr].Refresh()
 
+    def show_stack_view(self):
+        if not self.unicornEngine.is_active():
+            uemu_log("Emulator is not active")
+            return
+
+        if self.stackView is None:
+            self.stackView = uEmuStackView(self)
+            self.stackView.Create("uEmu Stack View")
+            self.stackView.SetContent(self.unicornEngine.mu)
+            self.stackView.Show()
+            self.stackView.Refresh()
+
     def show_mapped(self):
         if not self.unicornEngine.is_active():
             uemu_log("Emulator is not active")
@@ -1899,6 +2004,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         kSettingsMask_FollowPC  = 0x1
         kSettingsMask_ForceCode = 0x2
         kSettingsMask_TraceInst = 0x4
+        kSettingsMask_LazyMapping = 0x8
 
         settingsDlg = uEmuSettingsDialog()
         settingsDlg.Compile()
@@ -1907,12 +2013,14 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         if self.settings["follow_pc"]: settingsDlg.emu_group.value = settingsDlg.emu_group.value | kSettingsMask_FollowPC
         if self.settings["force_code"]: settingsDlg.emu_group.value = settingsDlg.emu_group.value | kSettingsMask_ForceCode
         if self.settings["trace_inst"]: settingsDlg.emu_group.value = settingsDlg.emu_group.value | kSettingsMask_TraceInst
+        if self.settings["lazy_mapping"]: settingsDlg.emu_group.value = settingsDlg.emu_group.value | kSettingsMask_LazyMapping
 
         ok = settingsDlg.Execute()
         if ok == 1:
             self.settings["follow_pc"] = True if settingsDlg.emu_group.value & kSettingsMask_FollowPC else False
             self.settings["force_code"] = True if settingsDlg.emu_group.value & kSettingsMask_ForceCode else False
             self.settings["trace_inst"] = True if settingsDlg.emu_group.value & kSettingsMask_TraceInst else False
+            self.settings["lazy_mapping"] = True if settingsDlg.emu_group.value & kSettingsMask_LazyMapping else False
 
     def close_windows(self):
         if self.cpuContextView is not None:
@@ -1922,6 +2030,10 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         if self.cpuExtContextView is not None:
             self.cpuExtContextView.Close()
             self.cpuExtContextView = None
+
+        if self.stackView is not None:
+            self.stackView.Close()
+            self.stackView = None
 
         for viewid in self.memoryViews:
             self.memoryViews[viewid].Close()
