@@ -45,6 +45,7 @@ Optionally **uEmu** can be loaded automatically as IDA plugin. In this case put 
 - **Show Controls** displays window with Start/Run/Step/Stop buttons
 - **Show CPU Context** displays window with available registers
 - **Show CPU Extended Context** displays window with extended registers (FP/SIMD)
+- **Show Stack** displays window with current Stack
 - **Show Memory Range** allows to display specific memory region
 
 ### Start
@@ -176,9 +177,14 @@ Please note that only registers defined in a plugin are saved.
 - **Follow PC** scrolls IDA View to current PC during emulation
 - **Convert to Code automatically** is IDA data under cursor is not code
 - **Trace instructions** prints every instruction emulator is executing
+- **Lazy mapping** adds pages on demand instead of maping all existing regions on start
 
 ![](./Resources/screenshots/doc_settings.png)
 
+## Extensions
+
+It is also possible to add new functionality or build your project on top of **uEmu** using extension system.  
+Please find description with example [here](./Extensions/README.md)
 
 
 

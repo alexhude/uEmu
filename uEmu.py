@@ -1295,6 +1295,10 @@ class uEmuUnicornEngine(object):
         return self.mu.mem_read(address, size)
 
     def trace_log(self):
+        if self.owner.ext_hooks.trace_log is not None:
+            if self.owner.ext_hooks.trace_log(self.pc):
+                return
+
         bytes = IDAAPI_GetBytes(self.pc, IDAAPI_NextHead(self.pc) - self.pc)
         bytes_hex = UEMU_HELPERS.bytes_to_str(bytes)
         uemu_log("* TRACE<I> 0x%X | %-16s | %s" % (self.pc, bytes_hex, IDAAPI_GetDisasm(self.pc, 0)))
@@ -1378,6 +1382,10 @@ class uEmuUnicornEngine(object):
             reg_ext_map = UEMU_HELPERS.get_register_ext_map(UEMU_HELPERS.get_arch())
             regs = regs + [ [ row[0], "0x0", UEMU_HELPERS.get_register_ext_bits(UEMU_HELPERS.get_arch()), True ] for row in reg_ext_map ]
 
+        if self.owner.ext_hooks.init_context is not None:
+            if self.owner.ext_hooks.init_context():
+                return True
+
         cpuContext = uEmuContextInitDialog(regs)
         ok = cpuContext.show()
         if ok:
@@ -1459,7 +1467,12 @@ class uEmuUnicornEngine(object):
 
     def step_thread_main(self):
         try:
-            self.mu.emu_start(self.pc | 1 if UEMU_HELPERS.is_thumb_ea(self.pc) else self.pc, -1, count=1)
+            emu_skip = False
+            if self.owner.ext_hooks.emu_step is not None:
+                emu_skip = self.owner.ext_hooks.emu_step(self.pc)
+
+            if emu_skip == False:
+                self.mu.emu_start(self.pc | 1 if UEMU_HELPERS.is_thumb_ea(self.pc) else self.pc, -1, count=1)
 
             # vvv Workaround to fix issue when registers are still updated even if emu_stop is called
             if self.fix_context is not None:
@@ -1585,6 +1598,11 @@ class uEmuUnicornEngine(object):
 
 # === uEmuPlugin
 
+class uEmuExtensionHooks:
+    init_context = None
+    trace_log = None
+    emu_step = None
+
 class uEmuPlugin(plugin_t, UI_Hooks):
 
     popup_menu_hook = None
@@ -1596,6 +1614,8 @@ class uEmuPlugin(plugin_t, UI_Hooks):
     wanted_name = "uEmu"
     plugin_name = "uEmu"
     wanted_hotkey = ""
+
+    ext_hooks = None
 
     # --- PLUGIN DATA
 
@@ -1617,10 +1637,12 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     # --- PLUGIN LIFECYCLE
 
-    def __init__(self, name = "uEmu"):
+    def __init__(self, name = "uEmu", hooks = uEmuExtensionHooks()):
         super(uEmuPlugin, self).__init__()
         self.plugin_name = name
         self.wanted_name = name
+
+        self.ext_hooks = hooks
 
         uemu_log("Init plugin %s" % (self.plugin_name))
 
@@ -1721,6 +1743,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":stop",              self.emu_stop,              "Stop",                       "Stop emulation",            None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":reset",             self.emu_reset,             "Reset",                      "Reset emulation",           None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,            "",                           None,                        None,                   True    ))
+        self.add_custom_menu()
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":jmp_pc",            self.jump_to_pc,            "Jump to PC",                 "Jump to PC",                "SHIFT+CTRL+ALT+J",     True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":cng_cpu",           self.change_cpu_context,    "Change CPU Context",         "Change CPU Context",        None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,            "",                           None,                        None,                   True    ))
@@ -1756,6 +1779,9 @@ class uEmuPlugin(plugin_t, UI_Hooks):
     def detach_main_menu_actions(self):
         for item in self.MENU_ITEMS:
             detach_action_from_menu("Edit/Plugins/" + self.plugin_name + "/" + item.title, item.action)
+
+    def add_custom_menu(self): # used by extensions
+        pass
 
     # --- POPUP MENU
 
