@@ -501,6 +501,8 @@ class UEMU_HELPERS:
         def __call__(self, flags):
             return not IDAAPI_HasValue(flags)
 
+# === Log
+
 def uemu_log(entry, name="uEmu"):
     msg("[" + name + "]: " + entry + "\n")
 
@@ -1664,7 +1666,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         self.unhook_ui_actions()
         self.detach_main_menu_actions()
         self.unregister_menu_actions()
-        uemu_log("Unload plugin")
+        uemu_log("Unload plugin " + self.plugin_name)
 
     def get_context_columns(self):
         return 2
@@ -1699,7 +1701,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         return self.settings["lazy_mapping"]
 
     def load_project(self):
-        filePath = IDAAPI_AskFile(0, "*.emu", "Open eEmu project")
+        filePath = IDAAPI_AskFile(0, "*.emu", "Open uEmu project")
         if filePath is None:
             return
         with open(filePath, 'rb') as file:
@@ -1990,7 +1992,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
                         return
 
                 self.memoryViews[mem_addr] = uEmuMemoryView(self, mem_addr, mem_size)
-                self.memoryViews[mem_addr].Create("uEmu Memory [ " + mem_cmnt.encode('utf8') + " ]")
+                self.memoryViews[mem_addr].Create("uEmu Memory [ " + mem_cmnt + " ]")
                 self.memoryViews[mem_addr].SetContent(self.unicornEngine.mu)
             self.memoryViews[mem_addr].Show()
             self.memoryViews[mem_addr].Refresh()
