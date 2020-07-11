@@ -86,7 +86,7 @@ from unicorn.x86_const import *
 # === Configuration
 
 class UEMU_CONFIG:
-    
+
     IDAViewColor_PC     = 0x00B3CBFF
     IDAViewColor_Reset  = 0xFFFFFFFF
 
@@ -105,7 +105,7 @@ class UEMU_HELPERS:
             action_handler_t.__init__(self)
             self.action_handler = handler
             self.action_type = action
-    
+
         def activate(self, ctx):
             if ctx.form_type == BWN_DISASM:
                 self.action_handler.handle_menu_action(self.action_type)
@@ -230,7 +230,7 @@ class UEMU_HELPERS:
                 [ "esp",    UC_X86_REG_ESP  ],
                 [ "eip",    UC_X86_REG_EIP  ],
                 [ "sp",     UC_X86_REG_SP   ],
-            ],        
+            ],
             "arm" : [
                 [ "R0",     UC_ARM_REG_R0  ],
                 [ "R1",     UC_ARM_REG_R1  ],
@@ -712,7 +712,7 @@ class uEmuMemoryView(simplecustviewer_t):
     def SetContent(self, context):
 
         self.ClearLines()
-        
+
         if context is None:
             return
 
@@ -1124,7 +1124,7 @@ class uEmuUnicornEngine(object):
         uc_context["cpu"] = [ [ row[1], self.mu.reg_read(row[1]) ] for row in reg_map ]
         uc_context["cpu_ext"] = [ [ row[1], self.mu.reg_read(row[1]) ] for row in reg_ext_map ]
         uc_context["mem"] = [ [ memStart, memEnd, memPerm, self.mu.mem_read(memStart, memEnd - memStart + 1) ] for (memStart, memEnd, memPerm) in self.mu.mem_regions() ]
-       
+
         return uc_context
 
     def set_context(self, context):
@@ -1190,7 +1190,7 @@ class uEmuUnicornEngine(object):
     def map_binary(self, address, size):
         binMapDlg = uEmuMapBinaryFileDialog(address)
         binMapDlg.Compile()
-        
+
         ok = binMapDlg.Execute()
         if ok != 1:
             return False
@@ -1308,7 +1308,7 @@ class uEmuUnicornEngine(object):
     def hook_mem_access(self, uc, access, address, size, value, user_data):
         def bpt_sync_check():
             return 1 if self.is_breakpoint_reached(address) else 0
-        
+
         if UEMU_HELPERS.exec_on_main(bpt_sync_check, MFF_READ):
             # vvv Workaround to fix issue when register are still updated even if emu_stop is called
             self.fix_context = self.mu.context_save()
@@ -1357,7 +1357,7 @@ class uEmuUnicornEngine(object):
 
     def init_cpu_context(self, pc):
         self.extended = False
-        
+
         # enable ARMv7 VFP
         if UEMU_HELPERS.get_arch() in ["armle", "armbe"]:
             if IDAAPI_AskYN(1, "Enable VFP instruction emulation?") == 1:
@@ -1414,6 +1414,10 @@ class uEmuUnicornEngine(object):
         if ok:
             for idx, val in enumerate(cpuContext.items[0:regs_len-1]):
                 self.mu.reg_write(reg_map[idx][1], int(val[1], 0))
+            if self.pc != self.mu.reg_read(self.uc_reg_pc):
+                IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_Reset)
+                self.pc = self.mu.reg_read(self.uc_reg_pc)
+                IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_PC)
             if self.extended:
                 for idx, val in enumerate(cpuContext.items[regs_len:]):
                     self.mu.reg_write(reg_ext_map[idx][1], int(val[1], 0))
@@ -1801,7 +1805,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
             for item in self.MENU_ITEMS:
                 if item.popup:
                     attach_action_to_popup(widget, popup_handle, item.action, self.plugin_name + "/")
-    
+
     # IDA 6.x
     def finish_populating_tform_popup(self, form, popup_handle):
         if get_tform_type(form) == BWN_DISASM:
@@ -1899,7 +1903,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         if not self.unicornEngine.is_active():
             uemu_log("Emulator is not active")
             return
-        
+
         self.unicornEngine.reset()
 
         self.close_windows()
