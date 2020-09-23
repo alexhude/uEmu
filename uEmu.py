@@ -72,9 +72,10 @@ else:
     # classes
     IDAAPI_Choose       = Choose2
 
-# PyQt
-from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtWidgets import (QPushButton, QHBoxLayout)
+# PyQt : need ida pro qt5 path
+# import sys
+# sys.path.append('D:\\Soft\\IDA Pro 7.x\\python\\3\\PyQt5')
+from PyQt5 import *
 
 # Unicorn SDK
 from unicorn import *
