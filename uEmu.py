@@ -73,8 +73,8 @@ else:
     IDAAPI_Choose       = Choose2
 
 # PyQt
-from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtWidgets import (QPushButton, QHBoxLayout)
+from PyQt5 import *
+from PyQt5.QtWidgets import *
 
 # Unicorn SDK
 from unicorn import *
@@ -623,7 +623,7 @@ class uEmuCpuContextView(simplecustviewer_t):
         else:
             regList = UEMU_HELPERS.get_register_map(arch)
         reg_cnt = len(regList)
-        lines = int(reg_cnt / cols) if reg_cnt % cols == 0 else (reg_cnt / cols) + 1
+        lines = int(reg_cnt // cols) if reg_cnt % cols == 0 else (reg_cnt // cols) + 1
         line = ""
         for i in range(lines):
             if i != 0:
