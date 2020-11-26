@@ -593,6 +593,10 @@ class uEmuCpuContextView(simplecustviewer_t):
         return True
 
     def SetContent(self, address, context):
+        if not self.owner.unicornEngine.is_active():
+            self.AddLine("Emulator is not active")
+            self.Refresh()
+            return
 
         arch = UEMU_HELPERS.get_arch()
         if arch == "":
@@ -789,8 +793,11 @@ class uEmuStackView(simplecustviewer_t):
         return True
 
     def SetContent(self, context):
-
         self.ClearLines()
+
+        if not self.owner.unicornEngine.is_active():
+            self.AddLine("Emulator is not active")
+            return
         if context is None:
             return
 
@@ -866,7 +873,150 @@ class uEmuControlView(PluginForm):
         self.owner.emu_stop()
 
     def OnClose(self, form):
-        self.owner.contol_view_closed()
+        self.owner.control_view_closed()
+
+
+# === uEmuControlCenterView
+class uEmuControlCenterView(PluginForm):
+    def __init__(self, owner):
+        self.owner = owner
+        self.controlPanel = None
+        self.cpuContextView = None
+        self.leftPanel = None
+        self.stackView = None
+        PluginForm.__init__(self)
+
+    def OnCreate(self, form):
+        self.parent = self.FormToPyQtWidget(form)
+        self.initUI()
+
+    def OnClose(self, form):
+        self.owner.control_center_closed()
+
+    @staticmethod
+    def InitLinearLayout(layout, *widgets):
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
+        for widget in widgets:
+            layout.addWidget(widget)
+        return layout
+
+    def initUI(self):
+        controlPanel = self.createControlPanel()
+        cpuContextView = self.createCpuContextView()
+        stackView = self.createStackView()
+
+        vboxLeft = self.InitLinearLayout(QVBoxLayout(), controlPanel, cpuContextView)
+        vboxLeft.setSizeConstraint(QLayout.SetMinimumSize)
+        self.leftPanel = QWidget(self.parent)
+        self.leftPanel.setLayout(vboxLeft)
+
+        hbox = QHBoxLayout()
+        hbox.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
+        hbox.addWidget(self.leftPanel)
+        hbox.addWidget(stackView)
+        self.parent.setLayout(hbox)
+        self._setSize()
+
+        # TEST
+        # controlPanel.setStyleSheet("background-color: red")
+        # cpuContextView.setStyleSheet("background-color: green")
+        # self.leftPanel.setStyleSheet("background-color: orange")
+        # stackView.setStyleSheet("background-color: blue")
+
+    def createControlPanel(self):
+        if self.controlPanel is None:
+            btnStart = QPushButton("Start")
+            btnRun = QPushButton("Run")
+            btnStep = QPushButton("Step")
+            btnStop = QPushButton("Stop")
+            btnReset = QPushButton("Reset")
+
+            btnMemory = QPushButton("Memory")
+            btnMinSize = QPushButton("MinSize")
+
+            btnStart.clicked.connect(lambda code=0:self.owner.emu_start())
+            btnRun.clicked.connect(lambda code=0:self.owner.emu_run())
+            btnStep.clicked.connect(lambda code=0:self.owner.emu_step())
+            btnStop.clicked.connect(lambda code=0:self.owner.emu_stop())
+            btnReset.clicked.connect(lambda code=0:self.owner.emu_reset())
+            btnMemory.clicked.connect(lambda code=0:self.owner.show_memory())
+            btnMinSize.clicked.connect(lambda code=0:self.restoreMinSizeWindow())
+
+            hbox1 = self.InitLinearLayout(QHBoxLayout(), btnStart, btnRun, btnStep, btnStop, btnReset)
+            hbox2 = self.InitLinearLayout(QHBoxLayout(), btnMemory, btnMinSize)
+            vbox = self.InitLinearLayout(QVBoxLayout())
+            vbox.addLayout(hbox1)
+            vbox.addLayout(hbox2)
+
+            # TEST
+            # btnTest = QPushButton("Test")
+            # btnTest.clicked.connect(lambda code=0:self._setSize())
+            # hbox2.addWidget(btnTest)
+
+            self.controlPanel = QWidget(self.parent)
+            self.controlPanel.setLayout(vbox)
+        return self.controlPanel
+
+    def createCpuContextView(self):
+        if self.cpuContextView is None:
+            self.cpuContextView = uEmuCpuContextView(self.owner, False)
+            self.cpuContextView.Create("uEmuControlCenterView CPU Context")
+        self.cpuContextView.SetContent(self.owner.unicornEngine.pc, self.owner.unicornEngine.mu)
+        self.cpuContextView.Refresh()
+        swigWidget = self.cpuContextView.GetWidget()
+        widget = self.FormToPyQtWidget(swigWidget)
+        return widget
+
+    def createStackView(self):
+        if self.stackView is None:
+            self.stackView = uEmuStackView(self.owner)
+            self.stackView.Create("uEmuControlCenterView Stack View")
+        self.stackView.SetContent(self.owner.unicornEngine.mu)
+        self.stackView.Refresh()
+        swigWidget = self.stackView.GetWidget()
+        widget = self.FormToPyQtWidget(swigWidget)
+        return widget
+
+    def SetCpuContextContent(self, address, context):
+        if self.cpuContextView is not None:
+            self.cpuContextView.SetContent(address, context)
+        pass
+
+    def SetStackContent(self, context):
+        if self.stackView is not None:
+            self.stackView.SetContent(context)
+
+    def _setSize(self):
+        controlPanelSizeHint = None
+        if self.controlPanel is not None:
+            controlPanelSizeHint = self.controlPanel.sizeHint()
+            self.controlPanel.setFixedSize(controlPanelSizeHint)
+        if controlPanelSizeHint is not None and self.cpuContextView is not None:
+            cpuContextViewWidget = self.FormToPyQtWidget(self.cpuContextView.GetWidget())
+            cpuContextViewWidget.setFixedWidth(controlPanelSizeHint.width())
+            cpuContextViewWidget.setMinimumHeight(240)
+        if controlPanelSizeHint is not None and self.leftPanel is not None:
+            self.leftPanel.setFixedWidth(controlPanelSizeHint.width())
+        if self.stackView is not None:
+            stackViewWidget = self.FormToPyQtWidget(self.stackView.GetWidget())
+            stackViewWidget.setFixedWidth(240)
+
+    @staticmethod
+    def GetOwnerWindow(widget):
+        while widget is not None:
+            wintype = widget.windowType()
+            if wintype & QtCore.Qt.Window or wintype & QtCore.Qt.Dialog:
+                return widget
+            widget = widget.parent()
+        return None
+
+    def restoreMinSizeWindow(self):
+        self._setSize()
+        window = self.GetOwnerWindow(self.parent)
+        size = self.parent.sizeHint()
+        window.resize(size.width(), size.height() + 18)
+
 
 # === uEmuMappeduMemoryView
 
@@ -1630,6 +1780,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         "lazy_mapping"  : False,
     }
 
+    controlCenterView = None
     controlView = None
     emuInitView = None
     cpuContextView = None
@@ -1739,6 +1890,8 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         [x.handler() for x in self.MENU_ITEMS if x.action == action]
 
     def register_menu_actions(self):
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":main_view",         self.show_controlcenter,    "Control Panel",              "Control Panel",             None,                   True    ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,            "",                           None,                        None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":start",             self.emu_start,             "Start",                      "Start emulation",           None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":run",               self.emu_run,               "Run",                        "Run",                       None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":step",              self.emu_step,              "Step",                       "Step to next instruction",  "SHIFT+CTRL+ALT+S",     True    ))
@@ -1811,7 +1964,10 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     # --- DELEGATES
 
-    def contol_view_closed(self):
+    def control_center_closed(self):
+        self.controlCenterView = None
+
+    def control_view_closed(self):
         self.controlView = None
 
     def context_view_closed(self):
@@ -1832,16 +1988,26 @@ class uEmuPlugin(plugin_t, UI_Hooks):
             self.cpuContextView.SetContent(address, context)
         if self.cpuExtContextView is not None:
             self.cpuExtContextView.SetContent(address, context)
+        if self.controlCenterView is not None:
+            self.controlCenterView.SetCpuContextContent(address, context)
 
         # Update Stack View
         if self.stackView is not None:
             self.stackView.SetContent(context)
+        if self.controlCenterView is not None:
+            self.controlCenterView.SetStackContent(context)
 
         # Update Memory Views
         for viewid in self.memoryViews:
             self.memoryViews[viewid].SetContent(context)
 
     # --- METHODS
+
+    def show_controlcenter(self):
+        uemu_log(str(self.controlCenterView))
+        if self.controlCenterView is None:
+            self.controlCenterView = uEmuControlCenterView(self)
+            self.controlCenterView.Show("uEmu Control Center")
 
     def emu_start(self):
         if self.unicornEngine.is_active():
@@ -1932,6 +2098,8 @@ class uEmuPlugin(plugin_t, UI_Hooks):
             self.cpuContextView.SetContent(self.unicornEngine.pc, self.unicornEngine.mu)
         if self.cpuExtContextView is not None:
             self.cpuExtContextView.SetContent(self.unicornEngine.pc, self.unicornEngine.mu)
+        if self.controlCenterView is not None:
+            self.controlCenterView.SetCpuContextContent(self.unicornEngine.pc, self.unicornEngine.mu)
 
     def show_controls(self):
         if self.controlView is None:
