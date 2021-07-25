@@ -1444,7 +1444,7 @@ class uEmuUnicornEngine(object):
                     segEnd = IDAAPI_SegEnd(segEA)
                     endAligned = UEMU_HELPERS.ALIGN_PAGE_UP(segEnd)
 
-                    # merge with provious if
+                    # merge with previous if
                     # - we have mapped some segments already
                     # - aligned old segment is overlapping new segment
                     # otherwise map new

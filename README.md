@@ -193,5 +193,5 @@ Please note that only registers defined in a plugin are saved.
 It is also possible to add new functionality or build your project on top of **uEmu** using extension system.  
 Please find description with example [here](./Extensions/README.md)
 
-
+* [**crauEmu**](https://github.com/DSecurity/crauEmu) - extension for developing and analyzing payloads for code-reuse attacks.
 
