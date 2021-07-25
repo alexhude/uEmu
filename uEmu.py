@@ -1103,6 +1103,9 @@ class uEmuUnicornEngine(object):
             "mipsle"    : [ UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS32  | UC_MODE_LITTLE_ENDIAN ],
         }
         arch = UEMU_HELPERS.get_arch()
+        if arch == "":
+            uemu_log("CPU is not supported")    
+            return
 
         self.uc_reg_pc, self.uc_arch, self.uc_mode = uc_setup[arch]
         uemu_log("Unicorn version [ %s ]" % (unicorn.__version__))
