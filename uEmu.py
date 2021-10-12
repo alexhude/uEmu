@@ -894,7 +894,7 @@ class uEmuMappeduMemoryView(IDAAPI_Choose):
     def OnDeleteLine(self, n): # Save JSON
         filePath = IDAAPI_AskFile(1, "*.bin", "Dump memory")
         if filePath is not None:
-            with open(filePath, 'w') as outfile:
+            with open(filePath, 'wb') as outfile:
                 address = self.items[n][0]
                 size = self.items[n][1] - self.items[n][0] + 1
                 outfile.seek(0, 0)
