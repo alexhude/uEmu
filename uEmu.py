@@ -1491,7 +1491,7 @@ class uEmuUnicornEngine(object):
 
                 if not IDAAPI_IsCode(IDAAPI_GetFlags(self.pc)) and self.owner.force_code():
                     uemu_log("Creating code at 0x%X" % (self.pc))
-                    IDAAPI_DelItems(self.pc, DOUNK_SIMPLE)
+                    IDAAPI_DelItems(self.pc, DELIT_SIMPLE)
                     IDAAPI_MakeCode(self.pc)
 
                 if self.emuStepCount != 1:
