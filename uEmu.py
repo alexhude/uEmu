@@ -2056,19 +2056,15 @@ class uEmuPlugin(plugin_t, UI_Hooks):
     def close_windows(self):
         if self.cpuContextView is not None:
             self.cpuContextView.Close()
-            self.cpuContextView = None
 
         if self.cpuExtContextView is not None:
             self.cpuExtContextView.Close()
-            self.cpuExtContextView = None
 
         if self.stackView is not None:
             self.stackView.Close()
-            self.stackView = None
 
-        for viewid in self.memoryViews:
+        for viewid in list(self.memoryViews):
             self.memoryViews[viewid].Close()
-            self.memoryViews[viewid] = None
 
 def PLUGIN_ENTRY():
     return uEmuPlugin()
