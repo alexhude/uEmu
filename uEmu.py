@@ -169,17 +169,9 @@ class UEMU_HELPERS:
                 return "mipsbe"
             else:
                 return "mipsle"
-        # elif ph.id == PLFM_PPC and ph.flag & PR_USE64:
-        #     assert False, 'TEST ME'
-        #     if UEMU_HELPERS.inf_is_be():
-        #         return "ppc64be"
-        #     else:
-        #         return "ppc64le"
         elif ph.id == PLFM_PPC and ph.flag & PR_USE32:
             if UEMU_HELPERS.inf_is_be():
                 return "ppcbe"
-            else:
-                return "ppcle"
         else:
             return ""
 
@@ -367,11 +359,11 @@ class UEMU_HELPERS:
                 ["r30"   , UC_PPC_REG_30],
                 ["r31"   , UC_PPC_REG_31],
                 ["pc"    , UC_PPC_REG_PC],
-                ["cr"    , UC_PPC_REG_CR0]
-                ["lr"    , UC_PPC_REG_LR]
-                ["xer"   , UC_PPC_REG_XER]
-                ["ctr"   , UC_PPC_REG_CTR]
-                ["msr"   , UC_PPC_REG_MSR ]
+                ["cr"    , UC_PPC_REG_CR0],
+                ["lr"    , UC_PPC_REG_LR],
+                ["xer"   , UC_PPC_REG_XER],
+                ["ctr"   , UC_PPC_REG_CTR],
+                ["msr"   , UC_PPC_REG_MSR ],
             ]
         }
         return registers[arch]
