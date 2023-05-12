@@ -576,7 +576,7 @@ class uEmuCpuContextView(simplecustviewer_t):
         self.lastAddress = None
         self.lastContext = {}
         self.lastArch = None
-        self.columns = None
+        self.columns = 3
 
     def Create(self, title):
 
@@ -1810,8 +1810,8 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":jmp_pc",            self.jump_to_pc,            "Jump to PC",                 "Jump to PC",                "SHIFT+CTRL+ALT+J",     True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":cng_cpu",           self.change_cpu_context,    "Change CPU Context",         "Change CPU Context",        None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,            "",                           None,                        None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":ctl_view",          self.show_controls,         "Show Controls",              "Show Control Window",       None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":cpu_view",          self.show_cpu_context,      "Show CPU Context",           "Show CPU Registers",        None,                   True    ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":ctl_view",          self.show_controls,         "Show Controls",              "Show Control Window",       "SHIFT+CTRL+C",         True    ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":cpu_view",          self.show_cpu_context,      "Show CPU Context",           "Show CPU Registers",        "SHIFT+CTRL+V",         True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":cpu_ext_view",      self.show_cpu_ext_context,  "Show CPU Extended Context",  "Show Extended Registers",   None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":stack_view",        self.show_stack_view,       "Show Stack View",            "Show Stack View",           None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":mem_view",          self.show_memory,           "Show Memory Range",          "Show Memory Range",         None,                   True    ))
