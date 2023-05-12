@@ -74,7 +74,7 @@ else:
 
 # PyQt
 from PyQt5 import *
-from PyQt5 import QtCore
+from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtWidgets import *
 
 # Unicorn SDK
@@ -876,8 +876,8 @@ class uEmuStackView(simplecustviewer_t):
 # === uEmuControlView
 
 class uEmuControlView(PluginForm):
-    def __init__(self, owner):
-        self.owner = owner
+    def __init__(self, owner: 'uEmuPlugin'):
+        self.owner: uEmuPlugin = owner
         PluginForm.__init__(self)
 
     def OnCreate(self, form):
@@ -889,11 +889,13 @@ class uEmuControlView(PluginForm):
         btnRun = QPushButton("Run")
         btnStep = QPushButton("Step")
         btnStop = QPushButton("Stop")
+        btnReset = QPushButton("Reset")
 
         btnStart.clicked.connect(self.OnEmuStart)
         btnRun.clicked.connect(self.OnEmuRun)
         btnStep.clicked.connect(self.OnEmuStep)
         btnStop.clicked.connect(self.OnEmuStop)
+        btnReset.clicked.connect(self.OnEmuReset)
 
         hbox = QHBoxLayout()
         hbox.setAlignment(QtCore.Qt.AlignCenter)
@@ -901,6 +903,7 @@ class uEmuControlView(PluginForm):
         hbox.addWidget(btnRun)
         hbox.addWidget(btnStep)
         hbox.addWidget(btnStop)
+        hbox.addWidget(btnReset)
 
         self.parent.setLayout(hbox)
 
@@ -918,6 +921,9 @@ class uEmuControlView(PluginForm):
 
     def OnClose(self, form):
         self.owner.contol_view_closed()
+
+    def OnEmuReset(self, code=0):
+        self.owner.emu_reset()
 
 # === uEmuMappeduMemoryView
 
