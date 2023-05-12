@@ -108,7 +108,7 @@ class UEMU_HELPERS:
             self.action_type = action
     
         def activate(self, ctx):
-            if ctx.form_type == BWN_DISASM:
+            if ctx.widget_type == BWN_DISASM:
                 self.action_handler.handle_menu_action(self.action_type)
             return 1
 
