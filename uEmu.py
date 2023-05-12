@@ -74,6 +74,7 @@ else:
 
 # PyQt
 from PyQt5 import *
+from PyQt5 import QtCore
 from PyQt5.QtWidgets import *
 
 # Unicorn SDK
