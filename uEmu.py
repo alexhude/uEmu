@@ -523,7 +523,7 @@ class UEMU_HELPERS:
                     t = get_sreg(ea, "T")  # get T flag
                 else:
                     t = get_segreg(ea, 20) # get T flag
-                return t is not BADSEL and t is not 0
+                return t != BADSEL and t != 0
             else:
                 return 0
         return UEMU_HELPERS.exec_on_main(handler, MFF_READ)
