@@ -1944,6 +1944,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
                 count = 1
 
         self.unicornEngine.step(count)
+        self.unicornEngine.jump_to_pc()
 
     def emu_stop(self):
         if not self.unicornEngine.is_active():
