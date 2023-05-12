@@ -82,6 +82,7 @@ from unicorn.arm_const import *
 from unicorn.arm64_const import *
 from unicorn.mips_const import *
 from unicorn.x86_const import *
+from unicorn.ppc_const import *
 
 # === Configuration
 
@@ -168,6 +169,17 @@ class UEMU_HELPERS:
                 return "mipsbe"
             else:
                 return "mipsle"
+        # elif ph.id == PLFM_PPC and ph.flag & PR_USE64:
+        #     assert False, 'TEST ME'
+        #     if UEMU_HELPERS.inf_is_be():
+        #         return "ppc64be"
+        #     else:
+        #         return "ppc64le"
+        elif ph.id == PLFM_PPC and ph.flag & PR_USE32:
+            if UEMU_HELPERS.inf_is_be():
+                return "ppcbe"
+            else:
+                return "ppcle"
         else:
             return ""
 
@@ -320,6 +332,41 @@ class UEMU_HELPERS:
                 [ "fp",     UC_MIPS_REG_30  ],
                 [ "ra",     UC_MIPS_REG_31  ],
                 [ "pc",     UC_MIPS_REG_PC  ],
+            ],
+            "ppcbe" : [
+                ["r"    , UC_PPC_REG_0],
+                ["r"    , UC_PPC_REG_1],
+                ["r"    , UC_PPC_REG_2],
+                ["r"    , UC_PPC_REG_3],
+                ["r"    , UC_PPC_REG_4],
+                ["r"    , UC_PPC_REG_5],
+                ["r"    , UC_PPC_REG_6],
+                ["r"    , UC_PPC_REG_7],
+                ["r"    , UC_PPC_REG_8],
+                ["r"    , UC_PPC_REG_9],
+                ["r"    , UC_PPC_REG_10],
+                ["r"    , UC_PPC_REG_11],
+                ["r"    , UC_PPC_REG_12],
+                ["r"    , UC_PPC_REG_13],
+                ["r"    , UC_PPC_REG_14],
+                ["r"    , UC_PPC_REG_15],
+                ["r"    , UC_PPC_REG_16],
+                ["r"    , UC_PPC_REG_17],
+                ["r"    , UC_PPC_REG_18],
+                ["r"    , UC_PPC_REG_19],
+                ["r"    , UC_PPC_REG_20],
+                ["r"    , UC_PPC_REG_21],
+                ["r"    , UC_PPC_REG_22],
+                ["r"    , UC_PPC_REG_23],
+                ["r"    , UC_PPC_REG_24],
+                ["r"    , UC_PPC_REG_25],
+                ["r"    , UC_PPC_REG_26],
+                ["r"    , UC_PPC_REG_27],
+                ["r"    , UC_PPC_REG_28],
+                ["r"    , UC_PPC_REG_29],
+                ["r"    , UC_PPC_REG_30],
+                ["r"    , UC_PPC_REG_31],
+                ["rPC"    , UC_PPC_REG_PC],
             ]
         }
         return registers[arch]
@@ -338,18 +385,22 @@ class UEMU_HELPERS:
             "x86"   : 32,
             "arm"   : 32,
             "arm64" : 64,
-            "mips"  : 32
+            "mips"  : 32,
+            "ppcbe" : 32
         }
         return registers_bits[arch]
 
     @staticmethod
-    def get_register_ext_map(arch):
+    def get_register_ext_map(arch: str):
         if arch.startswith("arm64"):
             arch = "arm64"
         elif arch.startswith("arm"):
             arch = "arm"
         elif arch.startswith("mips"):
             arch = "mips"
+        elif arch.startswith("ppc"):
+            arch = "ppc"
+            
 
         registers_ext = {
             "x64" : [
@@ -425,7 +476,9 @@ class UEMU_HELPERS:
                 [ "Q31",    UC_ARM64_REG_Q31 ],
             ],
             "mips" : [
-            ]
+            ],
+            "ppc" : [
+            ],
         }
         return registers_ext[arch]
 
@@ -1101,6 +1154,7 @@ class uEmuUnicornEngine(object):
             "mips64le"  : [ UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS64  | UC_MODE_LITTLE_ENDIAN ],
             "mipsbe"    : [ UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS32  | UC_MODE_BIG_ENDIAN    ],
             "mipsle"    : [ UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS32  | UC_MODE_LITTLE_ENDIAN ],
+            "ppcbe"     : [ UC_PPC_REG_PC,      UC_ARCH_PPC,    UC_MODE_PPC32   | UC_MODE_BIG_ENDIAN ],
         }
         arch = UEMU_HELPERS.get_arch()
         if arch == "":
