@@ -469,8 +469,10 @@ class UEMU_HELPERS:
     def is_thumb_ea(ea):
         def handler():
             if ph.id == PLFM_ARM and not ph.flag & PR_USE64:
-                if IDA_SDK_VERSION >= 700:
-                    t = get_sreg(ea, "T")  # get T flag
+                if IDA_SDK_VERSION == 700:
+                    t = get_sreg(ea, 20)  # at least 7.0 wants int
+                elif IDA_SDK_VERSION > 700:
+                    t = get_sreg(ea, "T") # 8.1 wants const char
                 else:
                     t = get_segreg(ea, 20) # get T flag
                 return t is not BADSEL and t is not 0
@@ -845,12 +847,14 @@ class uEmuControlView(PluginForm):
         btnStep = QPushButton("Step")
         btnSkip = QPushButton("Skip")
         btnStop = QPushButton("Stop")
+        btnReset = QPushButton("Reset")
 
         btnStart.clicked.connect(self.OnEmuStart)
         btnRun.clicked.connect(self.OnEmuRun)
         btnStep.clicked.connect(self.OnEmuStep)
         btnSkip.clicked.connect(self.OnEmuSkip)
         btnStop.clicked.connect(self.OnEmuStop)
+        btnReset.clicked.connect(self.OnEmuReset)
 
         hbox = QHBoxLayout()
         hbox.setAlignment(QtCore.Qt.AlignCenter)
@@ -859,6 +863,7 @@ class uEmuControlView(PluginForm):
         hbox.addWidget(btnStep)
         hbox.addWidget(btnSkip)
         hbox.addWidget(btnStop)
+        hbox.addWidget(btnReset)
 
         self.parent.setLayout(hbox)
 
@@ -867,6 +872,9 @@ class uEmuControlView(PluginForm):
 
     def OnEmuSkip(self, code=0):
         self.owner.emu_skip()
+
+    def OnEmuReset(self,code=0):
+        self.owner.emu_reset()
 
     def OnEmuRun(self, code=0):
         self.owner.emu_run()
@@ -1595,7 +1603,16 @@ class uEmuUnicornEngine(object):
         for n in range(0, count):
             self.pc = IDAAPI_NextHead(self.pc) 
 
-        self.unicornEngine.jump_to_pc()
+        # emulation stopped - update UI
+        IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_PC)
+
+        self.owner.update_context(self.pc, self.mu)
+
+        if self.owner.follow_pc():
+            self.jump_to_pc()
+
+        # self.emuStepCount = 14
+        # self.emuRunning = False
 
     def run(self):
         self.step(self.kStepCount_Run)
