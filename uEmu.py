@@ -86,7 +86,7 @@ from unicorn.x86_const import *
 # === Configuration
 
 class UEMU_CONFIG:
-    
+
     IDAViewColor_PC     = 0x00B3CBFF
     IDAViewColor_Reset  = 0xFFFFFFFF
 
@@ -105,7 +105,7 @@ class UEMU_HELPERS:
             action_handler_t.__init__(self)
             self.action_handler = handler
             self.action_type = action
-    
+
         def activate(self, ctx):
             if ctx.form_type == BWN_DISASM:
                 self.action_handler.handle_menu_action(self.action_type)
@@ -230,7 +230,7 @@ class UEMU_HELPERS:
                 [ "esp",    UC_X86_REG_ESP  ],
                 [ "eip",    UC_X86_REG_EIP  ],
                 [ "sp",     UC_X86_REG_SP   ],
-            ],        
+            ],
             "arm" : [
                 [ "R0",     UC_ARM_REG_R0  ],
                 [ "R1",     UC_ARM_REG_R1  ],
@@ -476,6 +476,7 @@ class UEMU_HELPERS:
                 return t is not BADSEL and t is not 0
             else:
                 return 0
+
         return UEMU_HELPERS.exec_on_main(handler, MFF_READ)
 
     @staticmethod
@@ -514,6 +515,7 @@ class uEmuInitView(object):
         self.owner = owner
 
 # === uEmuCpuContextView
+
 
 class uEmuCpuContextView(simplecustviewer_t):
 
@@ -676,7 +678,9 @@ class uEmuCpuContextView(simplecustviewer_t):
         else:
             self.owner.context_view_closed()
 
+
 # === uEmuMemoryView
+
 
 class uEmuMemoryRangeDialog(Form):
     def __init__(self):
@@ -712,7 +716,7 @@ class uEmuMemoryView(simplecustviewer_t):
     def SetContent(self, context):
 
         self.ClearLines()
-        
+
         if context is None:
             return
 
@@ -822,7 +826,9 @@ class uEmuStackView(simplecustviewer_t):
     def OnClose(self):
         self.owner.stack_view_closed()
 
+
 # === uEmuControlView
+
 
 class uEmuControlView(PluginForm):
     def __init__(self, owner):
@@ -837,11 +843,13 @@ class uEmuControlView(PluginForm):
         btnStart = QPushButton("Start")
         btnRun = QPushButton("Run")
         btnStep = QPushButton("Step")
+        btnSkip = QPushButton("Skip")
         btnStop = QPushButton("Stop")
 
         btnStart.clicked.connect(self.OnEmuStart)
         btnRun.clicked.connect(self.OnEmuRun)
         btnStep.clicked.connect(self.OnEmuStep)
+        btnSkip.clicked.connect(self.OnEmuSkip)
         btnStop.clicked.connect(self.OnEmuStop)
 
         hbox = QHBoxLayout()
@@ -849,12 +857,16 @@ class uEmuControlView(PluginForm):
         hbox.addWidget(btnStart)
         hbox.addWidget(btnRun)
         hbox.addWidget(btnStep)
+        hbox.addWidget(btnSkip)
         hbox.addWidget(btnStop)
 
         self.parent.setLayout(hbox)
 
     def OnEmuStart(self, code=0):
         self.owner.emu_start()
+
+    def OnEmuSkip(self, code=0):
+        self.owner.emu_skip()
 
     def OnEmuRun(self, code=0):
         self.owner.emu_run()
@@ -924,7 +936,9 @@ class uEmuMappeduMemoryView(IDAAPI_Choose):
     def show(self):
         return self.Show(True) >= 0
 
+
 # === Settings
+
 
 class uEmuSettingsDialog(Form):
     def __init__(self):
@@ -941,6 +955,7 @@ uEmu Settings
         })
 
 # === uEmuUnicornEngine
+
 
 class uEmuRegisterValueDialog(Form):
     def __init__(self, regName):
@@ -1071,6 +1086,7 @@ class uEmuContextInitDialog(IDAAPI_Choose):
     def show(self):
         return self.Show(True) >= 0
 
+
 class uEmuUnicornEngine(object):
 
     mu = None
@@ -1104,7 +1120,7 @@ class uEmuUnicornEngine(object):
         }
         arch = UEMU_HELPERS.get_arch()
         if arch == "":
-            uemu_log("CPU is not supported")    
+            uemu_log("CPU is not supported")
             return
 
         self.uc_reg_pc, self.uc_arch, self.uc_mode = uc_setup[arch]
@@ -1127,7 +1143,7 @@ class uEmuUnicornEngine(object):
         uc_context["cpu"] = [ [ row[1], self.mu.reg_read(row[1]) ] for row in reg_map ]
         uc_context["cpu_ext"] = [ [ row[1], self.mu.reg_read(row[1]) ] for row in reg_ext_map ]
         uc_context["mem"] = [ [ memStart, memEnd, memPerm, self.mu.mem_read(memStart, memEnd - memStart + 1) ] for (memStart, memEnd, memPerm) in self.mu.mem_regions() ]
-       
+
         return uc_context
 
     def set_context(self, context):
@@ -1193,7 +1209,7 @@ class uEmuUnicornEngine(object):
     def map_binary(self, address, size):
         binMapDlg = uEmuMapBinaryFileDialog(address)
         binMapDlg.Compile()
-        
+
         ok = binMapDlg.Execute()
         if ok != 1:
             return False
@@ -1311,7 +1327,7 @@ class uEmuUnicornEngine(object):
     def hook_mem_access(self, uc, access, address, size, value, user_data):
         def bpt_sync_check():
             return 1 if self.is_breakpoint_reached(address) else 0
-        
+
         if UEMU_HELPERS.exec_on_main(bpt_sync_check, MFF_READ):
             # vvv Workaround to fix issue when register are still updated even if emu_stop is called
             self.fix_context = self.mu.context_save()
@@ -1360,7 +1376,7 @@ class uEmuUnicornEngine(object):
 
     def init_cpu_context(self, pc):
         self.extended = False
-        
+
         # enable ARMv7 VFP
         if UEMU_HELPERS.get_arch() in ["armle", "armbe"]:
             if IDAAPI_AskYN(1, "Enable VFP instruction emulation?") == 1:
@@ -1484,6 +1500,7 @@ class uEmuUnicornEngine(object):
                 self.mu.context_restore(self.fix_context)
                 self.fix_context = None
             # ^^^
+
             def result_handler():
                 self.pc = self.mu.reg_read(self.uc_reg_pc)
                 if self.owner.trace_inst():
@@ -1572,6 +1589,13 @@ class uEmuUnicornEngine(object):
         self.emuThread = threading.Thread(target=self.step_thread_main)
         self.emuRunning = True
         self.emuThread.start()
+
+    def skip(self, count=1):
+        IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_Reset)
+        for n in range(0, count):
+            self.pc = IDAAPI_NextHead(self.pc) 
+
+        self.unicornEngine.jump_to_pc()
 
     def run(self):
         self.step(self.kStepCount_Run)
@@ -1804,7 +1828,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
             for item in self.MENU_ITEMS:
                 if item.popup:
                     attach_action_to_popup(widget, popup_handle, item.action, self.plugin_name + "/")
-    
+
     # IDA 6.x
     def finish_populating_tform_popup(self, form, popup_handle):
         if get_tform_type(form) == BWN_DISASM:
@@ -1869,6 +1893,25 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
         self.unicornEngine.run()
 
+    def emu_skip(self):
+        if not self.unicornEngine.is_active():
+            uemu_log("Emulator is not active")
+            return
+
+        if self.unicornEngine.is_running():
+            uemu_log("Emulator is running")
+            return
+
+        count = 1
+        if UEMU_HELPERS.is_alt_pressed():
+            count = IDAAPI_AskLong(1, "Enter Step Count")
+            if count is None or count < 0:
+                return
+            if count == 0:
+                count = 1
+
+        self.unicornEngine.skip(count)
+
     def emu_step(self):
         if not self.unicornEngine.is_active():
             uemu_log("Emulator is not active")
@@ -1902,7 +1945,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         if not self.unicornEngine.is_active():
             uemu_log("Emulator is not active")
             return
-        
+
         self.unicornEngine.reset()
 
         self.close_windows()
