@@ -6,99 +6,103 @@
 #  Copyright (c) 2017 Alexander Hude. All rights reserved.
 #
 
-UEMU_USE_AS_SCRIPT      = True    # Set to `False` if you want to load uEmu automatically as IDA Plugin
+from unicorn.x86_const import *
+from unicorn.mips_const import *
+from unicorn.arm64_const import *
+from unicorn.arm_const import *
+from unicorn import *
+from PyQt5.QtWidgets import *
+from PyQt5 import *
+from idautils import *
+from idc import *
+from idaapi import *
+import collections
+import os
+import json
+import threading
+import pickle
+# Set to `False` if you want to load uEmu automatically as IDA Plugin
+UEMU_USE_AS_SCRIPT = True
 
 # === Import
 
-import pickle
-import threading
-import json
-import os
-import collections
 
 # IDA Python SDK
-from idaapi import *
-from idc import *
-from idautils import *
 
 if IDA_SDK_VERSION >= 700:
     # functions
-    IDAAPI_ScreenEA     = get_screen_ea
-    IDAAPI_IsCode       = is_code
-    IDAAPI_DelItems     = del_items
-    IDAAPI_MakeCode     = create_insn
-    IDAAPI_GetFlags     = get_full_flags
-    IDAAPI_SetColor     = set_color
-    IDAAPI_IsLoaded     = is_loaded
-    IDAAPI_HasValue     = has_value
-    IDAAPI_GetBptQty    = get_bpt_qty
-    IDAAPI_GetBptEA     = get_bpt_ea
-    IDAAPI_GetBptAttr   = get_bpt_attr
-    IDAAPI_SegStart     = get_segm_start
-    IDAAPI_SegEnd       = get_segm_end
-    IDAAPI_GetBytes     = get_bytes
-    IDAAPI_AskYN        = ask_yn
-    IDAAPI_AskFile      = ask_file
-    IDAAPI_AskLong      = ask_long
-    IDAAPI_NextHead     = next_head
-    IDAAPI_GetDisasm    = lambda a, b: tag_remove(generate_disasm_line(a, b))
-    IDAAPI_NextThat     = next_that
-    IDAAPI_Jump         = jumpto
+    IDAAPI_ScreenEA = get_screen_ea
+    IDAAPI_IsCode = is_code
+    IDAAPI_DelItems = del_items
+    IDAAPI_MakeCode = create_insn
+    IDAAPI_GetFlags = get_full_flags
+    IDAAPI_SetColor = set_color
+    IDAAPI_IsLoaded = is_loaded
+    IDAAPI_HasValue = has_value
+    IDAAPI_GetBptQty = get_bpt_qty
+    IDAAPI_GetBptEA = get_bpt_ea
+    IDAAPI_GetBptAttr = get_bpt_attr
+    IDAAPI_SegStart = get_segm_start
+    IDAAPI_SegEnd = get_segm_end
+    IDAAPI_GetBytes = get_bytes
+    IDAAPI_AskYN = ask_yn
+    IDAAPI_AskFile = ask_file
+    IDAAPI_AskLong = ask_long
+    IDAAPI_NextHead = next_head
+    def IDAAPI_GetDisasm(a, b): return tag_remove(generate_disasm_line(a, b))
+    IDAAPI_NextThat = next_that
+    IDAAPI_Jump = jumpto
     # classes
-    IDAAPI_Choose       = Choose
+    IDAAPI_Choose = Choose
 else:
     # functions
-    IDAAPI_ScreenEA     = ScreenEA
-    IDAAPI_IsCode       = isCode
-    IDAAPI_DelItems     = MakeUnkn
-    IDAAPI_MakeCode     = MakeCode
-    IDAAPI_GetFlags     = getFlags
-    IDAAPI_SetColor     = SetColor
-    IDAAPI_IsLoaded     = isLoaded
-    IDAAPI_HasValue     = hasValue
-    IDAAPI_GetBptQty    = GetBptQty
-    IDAAPI_GetBptEA     = GetBptEA
-    IDAAPI_GetBptAttr   = GetBptAttr
-    IDAAPI_SegStart     = SegStart
-    IDAAPI_SegEnd       = SegEnd
-    IDAAPI_GetBytes     = get_many_bytes
-    IDAAPI_AskYN        = AskYN
-    IDAAPI_AskFile      = AskFile
-    IDAAPI_AskLong      = AskLong
-    IDAAPI_NextHead     = NextHead
-    IDAAPI_GetDisasm    = GetDisasmEx
-    IDAAPI_NextThat     = nextthat
-    IDAAPI_Jump         = Jump
+    IDAAPI_ScreenEA = ScreenEA
+    IDAAPI_IsCode = isCode
+    IDAAPI_DelItems = MakeUnkn
+    IDAAPI_MakeCode = MakeCode
+    IDAAPI_GetFlags = getFlags
+    IDAAPI_SetColor = SetColor
+    IDAAPI_IsLoaded = isLoaded
+    IDAAPI_HasValue = hasValue
+    IDAAPI_GetBptQty = GetBptQty
+    IDAAPI_GetBptEA = GetBptEA
+    IDAAPI_GetBptAttr = GetBptAttr
+    IDAAPI_SegStart = SegStart
+    IDAAPI_SegEnd = SegEnd
+    IDAAPI_GetBytes = get_many_bytes
+    IDAAPI_AskYN = AskYN
+    IDAAPI_AskFile = AskFile
+    IDAAPI_AskLong = AskLong
+    IDAAPI_NextHead = NextHead
+    IDAAPI_GetDisasm = GetDisasmEx
+    IDAAPI_NextThat = nextthat
+    IDAAPI_Jump = Jump
     # classes
-    IDAAPI_Choose       = Choose2
+    IDAAPI_Choose = Choose2
 
 # PyQt
-from PyQt5 import *
-from PyQt5.QtWidgets import *
 
 # Unicorn SDK
-from unicorn import *
-from unicorn.arm_const import *
-from unicorn.arm64_const import *
-from unicorn.mips_const import *
-from unicorn.x86_const import *
 
 # === Configuration
 
+
 class UEMU_CONFIG:
 
-    IDAViewColor_PC     = 0x00B3CBFF
-    IDAViewColor_Reset  = 0xFFFFFFFF
+    IDAViewColor_PC = 0x00B3CBFF
+    IDAViewColor_Reset = 0xFFFFFFFF
 
-    UnicornPageSize     = 0x1000
+    UnicornPageSize = 0x1000
 
 # === Helpers
+
 
 class UEMU_HELPERS:
 
     # Menu
 
-    MenuItem = collections.namedtuple("MenuItem", ["action", "handler", "title", "tooltip", "shortcut", "popup"])
+    MenuItem = collections.namedtuple(
+        "MenuItem", ["action", "handler", "title", "tooltip", "shortcut", "popup"])
 
     class IdaMenuActionHandler(action_handler_t):
         def __init__(self, handler, action):
@@ -181,11 +185,11 @@ class UEMU_HELPERS:
             arch = "mips"
 
         registers = {
-            "x64" : ("rsp", UC_X86_REG_RSP),
-            "x86" : ("esp", UC_X86_REG_ESP),
-            "arm" : ("SP", UC_ARM_REG_SP),
-            "arm64" : ("SP", UC_ARM64_REG_SP),
-            "mips" : ("sp", UC_MIPS_REG_29),
+            "x64": ("rsp", UC_X86_REG_RSP),
+            "x86": ("esp", UC_X86_REG_ESP),
+            "arm": ("SP", UC_ARM_REG_SP),
+            "arm64": ("SP", UC_ARM64_REG_SP),
+            "mips": ("sp", UC_MIPS_REG_29),
         }
         return registers[arch]
 
@@ -199,127 +203,127 @@ class UEMU_HELPERS:
             arch = "mips"
 
         registers = {
-            "x64" : [
-                [ "rax",    UC_X86_REG_RAX  ],
-                [ "rbx",    UC_X86_REG_RBX  ],
-                [ "rcx",    UC_X86_REG_RCX  ],
-                [ "rdx",    UC_X86_REG_RDX  ],
-                [ "rsi",    UC_X86_REG_RSI  ],
-                [ "rdi",    UC_X86_REG_RDI  ],
-                [ "rbp",    UC_X86_REG_RBP  ],
-                [ "rsp",    UC_X86_REG_RSP  ],
-                [ "r8",     UC_X86_REG_R8   ],
-                [ "r9",     UC_X86_REG_R9   ],
-                [ "r10",    UC_X86_REG_R10  ],
-                [ "r11",    UC_X86_REG_R11  ],
-                [ "r12",    UC_X86_REG_R12  ],
-                [ "r13",    UC_X86_REG_R13  ],
-                [ "r14",    UC_X86_REG_R14  ],
-                [ "r15",    UC_X86_REG_R15  ],
-                [ "rip",    UC_X86_REG_RIP  ],
-                [ "sp",     UC_X86_REG_SP   ],
+            "x64": [
+                ["rax",    UC_X86_REG_RAX],
+                ["rbx",    UC_X86_REG_RBX],
+                ["rcx",    UC_X86_REG_RCX],
+                ["rdx",    UC_X86_REG_RDX],
+                ["rsi",    UC_X86_REG_RSI],
+                ["rdi",    UC_X86_REG_RDI],
+                ["rbp",    UC_X86_REG_RBP],
+                ["rsp",    UC_X86_REG_RSP],
+                ["r8",     UC_X86_REG_R8],
+                ["r9",     UC_X86_REG_R9],
+                ["r10",    UC_X86_REG_R10],
+                ["r11",    UC_X86_REG_R11],
+                ["r12",    UC_X86_REG_R12],
+                ["r13",    UC_X86_REG_R13],
+                ["r14",    UC_X86_REG_R14],
+                ["r15",    UC_X86_REG_R15],
+                ["rip",    UC_X86_REG_RIP],
+                ["sp",     UC_X86_REG_SP],
             ],
-            "x86" : [
-                [ "eax",    UC_X86_REG_EAX  ],
-                [ "ebx",    UC_X86_REG_EBX  ],
-                [ "ecx",    UC_X86_REG_ECX  ],
-                [ "edx",    UC_X86_REG_EDX  ],
-                [ "esi",    UC_X86_REG_ESI  ],
-                [ "edi",    UC_X86_REG_EDI  ],
-                [ "ebp",    UC_X86_REG_EBP  ],
-                [ "esp",    UC_X86_REG_ESP  ],
-                [ "eip",    UC_X86_REG_EIP  ],
-                [ "sp",     UC_X86_REG_SP   ],
+            "x86": [
+                ["eax",    UC_X86_REG_EAX],
+                ["ebx",    UC_X86_REG_EBX],
+                ["ecx",    UC_X86_REG_ECX],
+                ["edx",    UC_X86_REG_EDX],
+                ["esi",    UC_X86_REG_ESI],
+                ["edi",    UC_X86_REG_EDI],
+                ["ebp",    UC_X86_REG_EBP],
+                ["esp",    UC_X86_REG_ESP],
+                ["eip",    UC_X86_REG_EIP],
+                ["sp",     UC_X86_REG_SP],
             ],
-            "arm" : [
-                [ "R0",     UC_ARM_REG_R0  ],
-                [ "R1",     UC_ARM_REG_R1  ],
-                [ "R2",     UC_ARM_REG_R2  ],
-                [ "R3",     UC_ARM_REG_R3  ],
-                [ "R4",     UC_ARM_REG_R4  ],
-                [ "R5",     UC_ARM_REG_R5  ],
-                [ "R6",     UC_ARM_REG_R6  ],
-                [ "R7",     UC_ARM_REG_R7  ],
-                [ "R8",     UC_ARM_REG_R8  ],
-                [ "R9",     UC_ARM_REG_R9  ],
-                [ "R10",    UC_ARM_REG_R10 ],
-                [ "R11",    UC_ARM_REG_R11 ],
-                [ "R12",    UC_ARM_REG_R12 ],
-                [ "PC",     UC_ARM_REG_PC  ],
-                [ "SP",     UC_ARM_REG_SP  ],
-                [ "LR",     UC_ARM_REG_LR  ],
-                [ "CPSR",   UC_ARM_REG_CPSR ]
+            "arm": [
+                ["R0",     UC_ARM_REG_R0],
+                ["R1",     UC_ARM_REG_R1],
+                ["R2",     UC_ARM_REG_R2],
+                ["R3",     UC_ARM_REG_R3],
+                ["R4",     UC_ARM_REG_R4],
+                ["R5",     UC_ARM_REG_R5],
+                ["R6",     UC_ARM_REG_R6],
+                ["R7",     UC_ARM_REG_R7],
+                ["R8",     UC_ARM_REG_R8],
+                ["R9",     UC_ARM_REG_R9],
+                ["R10",    UC_ARM_REG_R10],
+                ["R11",    UC_ARM_REG_R11],
+                ["R12",    UC_ARM_REG_R12],
+                ["PC",     UC_ARM_REG_PC],
+                ["SP",     UC_ARM_REG_SP],
+                ["LR",     UC_ARM_REG_LR],
+                ["CPSR",   UC_ARM_REG_CPSR]
             ],
-            "arm64" : [
-                [ "X0",     UC_ARM64_REG_X0  ],
-                [ "X1",     UC_ARM64_REG_X1  ],
-                [ "X2",     UC_ARM64_REG_X2  ],
-                [ "X3",     UC_ARM64_REG_X3  ],
-                [ "X4",     UC_ARM64_REG_X4  ],
-                [ "X5",     UC_ARM64_REG_X5  ],
-                [ "X6",     UC_ARM64_REG_X6  ],
-                [ "X7",     UC_ARM64_REG_X7  ],
-                [ "X8",     UC_ARM64_REG_X8  ],
-                [ "X9",     UC_ARM64_REG_X9  ],
-                [ "X10",    UC_ARM64_REG_X10 ],
-                [ "X11",    UC_ARM64_REG_X11 ],
-                [ "X12",    UC_ARM64_REG_X12 ],
-                [ "X13",    UC_ARM64_REG_X13 ],
-                [ "X14",    UC_ARM64_REG_X14 ],
-                [ "X15",    UC_ARM64_REG_X15 ],
-                [ "X16",    UC_ARM64_REG_X16 ],
-                [ "X17",    UC_ARM64_REG_X17 ],
-                [ "X18",    UC_ARM64_REG_X18 ],
-                [ "X19",    UC_ARM64_REG_X19 ],
-                [ "X20",    UC_ARM64_REG_X20 ],
-                [ "X21",    UC_ARM64_REG_X21 ],
-                [ "X22",    UC_ARM64_REG_X22 ],
-                [ "X23",    UC_ARM64_REG_X23 ],
-                [ "X24",    UC_ARM64_REG_X24 ],
-                [ "X25",    UC_ARM64_REG_X25 ],
-                [ "X26",    UC_ARM64_REG_X26 ],
-                [ "X27",    UC_ARM64_REG_X27 ],
-                [ "X28",    UC_ARM64_REG_X28 ],
-                [ "PC",     UC_ARM64_REG_PC  ],
-                [ "SP",     UC_ARM64_REG_SP  ],
-                [ "FP",     UC_ARM64_REG_FP  ],
-                [ "LR",     UC_ARM64_REG_LR  ],
-                [ "NZCV",   UC_ARM64_REG_NZCV ]
+            "arm64": [
+                ["X0",     UC_ARM64_REG_X0],
+                ["X1",     UC_ARM64_REG_X1],
+                ["X2",     UC_ARM64_REG_X2],
+                ["X3",     UC_ARM64_REG_X3],
+                ["X4",     UC_ARM64_REG_X4],
+                ["X5",     UC_ARM64_REG_X5],
+                ["X6",     UC_ARM64_REG_X6],
+                ["X7",     UC_ARM64_REG_X7],
+                ["X8",     UC_ARM64_REG_X8],
+                ["X9",     UC_ARM64_REG_X9],
+                ["X10",    UC_ARM64_REG_X10],
+                ["X11",    UC_ARM64_REG_X11],
+                ["X12",    UC_ARM64_REG_X12],
+                ["X13",    UC_ARM64_REG_X13],
+                ["X14",    UC_ARM64_REG_X14],
+                ["X15",    UC_ARM64_REG_X15],
+                ["X16",    UC_ARM64_REG_X16],
+                ["X17",    UC_ARM64_REG_X17],
+                ["X18",    UC_ARM64_REG_X18],
+                ["X19",    UC_ARM64_REG_X19],
+                ["X20",    UC_ARM64_REG_X20],
+                ["X21",    UC_ARM64_REG_X21],
+                ["X22",    UC_ARM64_REG_X22],
+                ["X23",    UC_ARM64_REG_X23],
+                ["X24",    UC_ARM64_REG_X24],
+                ["X25",    UC_ARM64_REG_X25],
+                ["X26",    UC_ARM64_REG_X26],
+                ["X27",    UC_ARM64_REG_X27],
+                ["X28",    UC_ARM64_REG_X28],
+                ["PC",     UC_ARM64_REG_PC],
+                ["SP",     UC_ARM64_REG_SP],
+                ["FP",     UC_ARM64_REG_FP],
+                ["LR",     UC_ARM64_REG_LR],
+                ["NZCV",   UC_ARM64_REG_NZCV]
             ],
-            "mips" : [
-                [ "zero",   UC_MIPS_REG_0   ],
-                [ "at",     UC_MIPS_REG_1   ],
-                [ "v0",     UC_MIPS_REG_2   ],
-                [ "v1",     UC_MIPS_REG_3   ],
-                [ "a0",     UC_MIPS_REG_4   ],
-                [ "a1",     UC_MIPS_REG_5   ],
-                [ "a2",     UC_MIPS_REG_6   ],
-                [ "a3",     UC_MIPS_REG_7   ],
-                [ "t0",     UC_MIPS_REG_8   ],
-                [ "t1",     UC_MIPS_REG_9   ],
-                [ "t2",     UC_MIPS_REG_10  ],
-                [ "t3",     UC_MIPS_REG_11  ],
-                [ "t4",     UC_MIPS_REG_12  ],
-                [ "t5",     UC_MIPS_REG_13  ],
-                [ "t6",     UC_MIPS_REG_14  ],
-                [ "t7",     UC_MIPS_REG_15  ],
-                [ "s0",     UC_MIPS_REG_16  ],
-                [ "s1",     UC_MIPS_REG_17  ],
-                [ "s2",     UC_MIPS_REG_18  ],
-                [ "s3",     UC_MIPS_REG_19  ],
-                [ "s4",     UC_MIPS_REG_20  ],
-                [ "s5",     UC_MIPS_REG_21  ],
-                [ "s6",     UC_MIPS_REG_22  ],
-                [ "s7",     UC_MIPS_REG_23  ],
-                [ "t8",     UC_MIPS_REG_24  ],
-                [ "t9",     UC_MIPS_REG_25  ],
-                [ "k0",     UC_MIPS_REG_26  ],
-                [ "k1",     UC_MIPS_REG_27  ],
-                [ "gp",     UC_MIPS_REG_28  ],
-                [ "sp",     UC_MIPS_REG_29  ],
-                [ "fp",     UC_MIPS_REG_30  ],
-                [ "ra",     UC_MIPS_REG_31  ],
-                [ "pc",     UC_MIPS_REG_PC  ],
+            "mips": [
+                ["zero",   UC_MIPS_REG_0],
+                ["at",     UC_MIPS_REG_1],
+                ["v0",     UC_MIPS_REG_2],
+                ["v1",     UC_MIPS_REG_3],
+                ["a0",     UC_MIPS_REG_4],
+                ["a1",     UC_MIPS_REG_5],
+                ["a2",     UC_MIPS_REG_6],
+                ["a3",     UC_MIPS_REG_7],
+                ["t0",     UC_MIPS_REG_8],
+                ["t1",     UC_MIPS_REG_9],
+                ["t2",     UC_MIPS_REG_10],
+                ["t3",     UC_MIPS_REG_11],
+                ["t4",     UC_MIPS_REG_12],
+                ["t5",     UC_MIPS_REG_13],
+                ["t6",     UC_MIPS_REG_14],
+                ["t7",     UC_MIPS_REG_15],
+                ["s0",     UC_MIPS_REG_16],
+                ["s1",     UC_MIPS_REG_17],
+                ["s2",     UC_MIPS_REG_18],
+                ["s3",     UC_MIPS_REG_19],
+                ["s4",     UC_MIPS_REG_20],
+                ["s5",     UC_MIPS_REG_21],
+                ["s6",     UC_MIPS_REG_22],
+                ["s7",     UC_MIPS_REG_23],
+                ["t8",     UC_MIPS_REG_24],
+                ["t9",     UC_MIPS_REG_25],
+                ["k0",     UC_MIPS_REG_26],
+                ["k1",     UC_MIPS_REG_27],
+                ["gp",     UC_MIPS_REG_28],
+                ["sp",     UC_MIPS_REG_29],
+                ["fp",     UC_MIPS_REG_30],
+                ["ra",     UC_MIPS_REG_31],
+                ["pc",     UC_MIPS_REG_PC],
             ]
         }
         return registers[arch]
@@ -334,11 +338,11 @@ class UEMU_HELPERS:
             arch = "mips"
 
         registers_bits = {
-            "x64"   : 64,
-            "x86"   : 32,
-            "arm"   : 32,
-            "arm64" : 64,
-            "mips"  : 32
+            "x64": 64,
+            "x86": 32,
+            "arm": 32,
+            "arm64": 64,
+            "mips": 32
         }
         return registers_bits[arch]
 
@@ -352,79 +356,79 @@ class UEMU_HELPERS:
             arch = "mips"
 
         registers_ext = {
-            "x64" : [
+            "x64": [
             ],
-            "x86" : [
+            "x86": [
             ],
-            "arm" : [
-                [ "D0",     UC_ARM_REG_D0  ],
-                [ "D1",     UC_ARM_REG_D1  ],
-                [ "D2",     UC_ARM_REG_D2  ],
-                [ "D3",     UC_ARM_REG_D3  ],
-                [ "D4",     UC_ARM_REG_D4  ],
-                [ "D5",     UC_ARM_REG_D5  ],
-                [ "D6",     UC_ARM_REG_D6  ],
-                [ "D7",     UC_ARM_REG_D7  ],
-                [ "D8",     UC_ARM_REG_D8  ],
-                [ "D9",     UC_ARM_REG_D9  ],
-                [ "D10",    UC_ARM_REG_D10 ],
-                [ "D11",    UC_ARM_REG_D11 ],
-                [ "D12",    UC_ARM_REG_D12 ],
-                [ "D13",    UC_ARM_REG_D13 ],
-                [ "D14",    UC_ARM_REG_D14 ],
-                [ "D15",    UC_ARM_REG_D15 ],
-                [ "D16",    UC_ARM_REG_D16 ],
-                [ "D17",    UC_ARM_REG_D17 ],
-                [ "D18",    UC_ARM_REG_D18 ],
-                [ "D19",    UC_ARM_REG_D19 ],
-                [ "D20",    UC_ARM_REG_D20 ],
-                [ "D21",    UC_ARM_REG_D21 ],
-                [ "D22",    UC_ARM_REG_D22 ],
-                [ "D23",    UC_ARM_REG_D23 ],
-                [ "D24",    UC_ARM_REG_D24 ],
-                [ "D25",    UC_ARM_REG_D25 ],
-                [ "D26",    UC_ARM_REG_D26 ],
-                [ "D27",    UC_ARM_REG_D27 ],
-                [ "D28",    UC_ARM_REG_D28 ],
-                [ "D29",    UC_ARM_REG_D29 ],
-                [ "D30",    UC_ARM_REG_D30 ],
-                [ "D31",    UC_ARM_REG_D31 ],
+            "arm": [
+                ["D0",     UC_ARM_REG_D0],
+                ["D1",     UC_ARM_REG_D1],
+                ["D2",     UC_ARM_REG_D2],
+                ["D3",     UC_ARM_REG_D3],
+                ["D4",     UC_ARM_REG_D4],
+                ["D5",     UC_ARM_REG_D5],
+                ["D6",     UC_ARM_REG_D6],
+                ["D7",     UC_ARM_REG_D7],
+                ["D8",     UC_ARM_REG_D8],
+                ["D9",     UC_ARM_REG_D9],
+                ["D10",    UC_ARM_REG_D10],
+                ["D11",    UC_ARM_REG_D11],
+                ["D12",    UC_ARM_REG_D12],
+                ["D13",    UC_ARM_REG_D13],
+                ["D14",    UC_ARM_REG_D14],
+                ["D15",    UC_ARM_REG_D15],
+                ["D16",    UC_ARM_REG_D16],
+                ["D17",    UC_ARM_REG_D17],
+                ["D18",    UC_ARM_REG_D18],
+                ["D19",    UC_ARM_REG_D19],
+                ["D20",    UC_ARM_REG_D20],
+                ["D21",    UC_ARM_REG_D21],
+                ["D22",    UC_ARM_REG_D22],
+                ["D23",    UC_ARM_REG_D23],
+                ["D24",    UC_ARM_REG_D24],
+                ["D25",    UC_ARM_REG_D25],
+                ["D26",    UC_ARM_REG_D26],
+                ["D27",    UC_ARM_REG_D27],
+                ["D28",    UC_ARM_REG_D28],
+                ["D29",    UC_ARM_REG_D29],
+                ["D30",    UC_ARM_REG_D30],
+                ["D31",    UC_ARM_REG_D31],
             ],
-            "arm64" : [
-                [ "Q0",     UC_ARM64_REG_Q0  ],
-                [ "Q1",     UC_ARM64_REG_Q1  ],
-                [ "Q2",     UC_ARM64_REG_Q2  ],
-                [ "Q3",     UC_ARM64_REG_Q3  ],
-                [ "Q4",     UC_ARM64_REG_Q4  ],
-                [ "Q5",     UC_ARM64_REG_Q5  ],
-                [ "Q6",     UC_ARM64_REG_Q6  ],
-                [ "Q7",     UC_ARM64_REG_Q7  ],
-                [ "Q8",     UC_ARM64_REG_Q8  ],
-                [ "Q9",     UC_ARM64_REG_Q9  ],
-                [ "Q10",    UC_ARM64_REG_Q10 ],
-                [ "Q11",    UC_ARM64_REG_Q11 ],
-                [ "Q12",    UC_ARM64_REG_Q12 ],
-                [ "Q13",    UC_ARM64_REG_Q13 ],
-                [ "Q14",    UC_ARM64_REG_Q14 ],
-                [ "Q15",    UC_ARM64_REG_Q15 ],
-                [ "Q16",    UC_ARM64_REG_Q16 ],
-                [ "Q17",    UC_ARM64_REG_Q17 ],
-                [ "Q18",    UC_ARM64_REG_Q18 ],
-                [ "Q19",    UC_ARM64_REG_Q19 ],
-                [ "Q20",    UC_ARM64_REG_Q20 ],
-                [ "Q21",    UC_ARM64_REG_Q21 ],
-                [ "Q22",    UC_ARM64_REG_Q22 ],
-                [ "Q23",    UC_ARM64_REG_Q23 ],
-                [ "Q24",    UC_ARM64_REG_Q24 ],
-                [ "Q25",    UC_ARM64_REG_Q25 ],
-                [ "Q26",    UC_ARM64_REG_Q26 ],
-                [ "Q27",    UC_ARM64_REG_Q27 ],
-                [ "Q28",    UC_ARM64_REG_Q28 ],
-                [ "Q29",    UC_ARM64_REG_Q29 ],
-                [ "Q30",    UC_ARM64_REG_Q30 ],
-                [ "Q31",    UC_ARM64_REG_Q31 ],
+            "arm64": [
+                ["Q0",     UC_ARM64_REG_Q0],
+                ["Q1",     UC_ARM64_REG_Q1],
+                ["Q2",     UC_ARM64_REG_Q2],
+                ["Q3",     UC_ARM64_REG_Q3],
+                ["Q4",     UC_ARM64_REG_Q4],
+                ["Q5",     UC_ARM64_REG_Q5],
+                ["Q6",     UC_ARM64_REG_Q6],
+                ["Q7",     UC_ARM64_REG_Q7],
+                ["Q8",     UC_ARM64_REG_Q8],
+                ["Q9",     UC_ARM64_REG_Q9],
+                ["Q10",    UC_ARM64_REG_Q10],
+                ["Q11",    UC_ARM64_REG_Q11],
+                ["Q12",    UC_ARM64_REG_Q12],
+                ["Q13",    UC_ARM64_REG_Q13],
+                ["Q14",    UC_ARM64_REG_Q14],
+                ["Q15",    UC_ARM64_REG_Q15],
+                ["Q16",    UC_ARM64_REG_Q16],
+                ["Q17",    UC_ARM64_REG_Q17],
+                ["Q18",    UC_ARM64_REG_Q18],
+                ["Q19",    UC_ARM64_REG_Q19],
+                ["Q20",    UC_ARM64_REG_Q20],
+                ["Q21",    UC_ARM64_REG_Q21],
+                ["Q22",    UC_ARM64_REG_Q22],
+                ["Q23",    UC_ARM64_REG_Q23],
+                ["Q24",    UC_ARM64_REG_Q24],
+                ["Q25",    UC_ARM64_REG_Q25],
+                ["Q26",    UC_ARM64_REG_Q26],
+                ["Q27",    UC_ARM64_REG_Q27],
+                ["Q28",    UC_ARM64_REG_Q28],
+                ["Q29",    UC_ARM64_REG_Q29],
+                ["Q30",    UC_ARM64_REG_Q30],
+                ["Q31",    UC_ARM64_REG_Q31],
             ],
-            "mips" : [
+            "mips": [
             ]
         }
         return registers_ext[arch]
@@ -439,11 +443,11 @@ class UEMU_HELPERS:
             arch = "mips"
 
         registers_ext_bits = {
-            "x64"   : 0,
-            "x86"   : 0,
-            "arm"   : 64,
-            "arm64" : 128,
-            "mips"  : 0
+            "x64": 0,
+            "x86": 0,
+            "arm": 64,
+            "arm64": 128,
+            "mips": 0
         }
         return registers_ext_bits[arch]
 
@@ -457,11 +461,11 @@ class UEMU_HELPERS:
             arch = "mips"
 
         registers_ext_format = {
-            "x64"   : "",
-            "x86"   : "",
-            "arm"   : "0x%.16X",
-            "arm64" : "0x%.32X",
-            "mips"  : 0
+            "x64": "",
+            "x86": "",
+            "arm": "0x%.16X",
+            "arm64": "0x%.32X",
+            "mips": 0
         }
         return registers_ext_format[arch]
 
@@ -469,12 +473,15 @@ class UEMU_HELPERS:
     def is_thumb_ea(ea):
         def handler():
             if ph.id == PLFM_ARM and not ph.flag & PR_USE64:
-                if IDA_SDK_VERSION == 700:
-                    t = get_sreg(ea, 20)  # at least 7.0 wants int
-                elif IDA_SDK_VERSION > 700:
-                    t = get_sreg(ea, "T") # 8.1 wants const char
+                if IDA_SDK_VERSION >= 700:
+                    #     t = get_sreg(ea, 20)  # at least 7.0 wants int
+                    # elif IDA_SDK_VERSION > 700:
+                    try:
+                        t = get_sreg(ea, "T")  # 8.1 wants const char
+                    except:
+                        t = get_sreg(ea, 20)
                 else:
-                    t = get_segreg(ea, 20) # get T flag
+                    t = get_segreg(ea, 20)  # get T flag
                 return t is not BADSEL and t is not 0
             else:
                 return 0
@@ -506,10 +513,12 @@ class UEMU_HELPERS:
 
 # === Log
 
+
 def uemu_log(entry, name="uEmu"):
     msg("[" + name + "]: " + entry + "\n")
 
 # === uEmuInitView
+
 
 class uEmuInitView(object):
     def __init__(self, owner):
@@ -562,11 +571,15 @@ class uEmuCpuContextView(simplecustviewer_t):
 
                 def finish_populating_widget_popup(self, widget, popup):
                     if self.form.title == get_widget_title(widget):
-                        attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "1 Column",       self.PopupActionHandler(self.form, self.form.menu_cols1),   None, None, -1))
-                        attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "2 Columns",      self.PopupActionHandler(self.form, self.form.menu_cols2),   None, None, -1))
-                        attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "3 Columns",      self.PopupActionHandler(self.form, self.form.menu_cols3),   None, None, -1))
+                        attach_dynamic_action_to_popup(widget, popup, action_desc_t(
+                            None, "1 Column",       self.PopupActionHandler(self.form, self.form.menu_cols1),   None, None, -1))
+                        attach_dynamic_action_to_popup(widget, popup, action_desc_t(
+                            None, "2 Columns",      self.PopupActionHandler(self.form, self.form.menu_cols2),   None, None, -1))
+                        attach_dynamic_action_to_popup(widget, popup, action_desc_t(
+                            None, "3 Columns",      self.PopupActionHandler(self.form, self.form.menu_cols3),   None, None, -1))
                         attach_action_to_popup(widget, popup, "-", None)
-                        attach_dynamic_action_to_popup(widget, popup, action_desc_t(None, "Change Context", self.PopupActionHandler(self.form, self.form.menu_update),  None, None, -1))
+                        attach_dynamic_action_to_popup(widget, popup, action_desc_t(
+                            None, "Change Context", self.PopupActionHandler(self.form, self.form.menu_update),  None, None, -1))
                         attach_action_to_popup(widget, popup, "-", None)
 
             if self.hooks is None:
@@ -609,7 +622,8 @@ class uEmuCpuContextView(simplecustviewer_t):
         else:
             hdr_title = COLSTR("  CPU context at [ ", SCOLOR_AUTOCMT)
         hdr_title += COLSTR("0x%X: " % address, SCOLOR_DREF)
-        hdr_title += COLSTR(UEMU_HELPERS.trim_spaces(IDAAPI_GetDisasm(address, 0)), SCOLOR_INSN)
+        hdr_title += COLSTR(UEMU_HELPERS.trim_spaces(
+            IDAAPI_GetDisasm(address, 0)), SCOLOR_INSN)
         hdr_title += COLSTR(" ]", SCOLOR_AUTOCMT)
         self.AddLine(hdr_title)
         self.AddLine("")
@@ -627,7 +641,8 @@ class uEmuCpuContextView(simplecustviewer_t):
         else:
             regList = UEMU_HELPERS.get_register_map(arch)
         reg_cnt = len(regList)
-        lines = int(reg_cnt // cols) if reg_cnt % cols == 0 else (reg_cnt // cols) + 1
+        lines = int(
+            reg_cnt // cols) if reg_cnt % cols == 0 else (reg_cnt // cols) + 1
         line = ""
         for i in range(lines):
             if i != 0:
@@ -655,11 +670,14 @@ class uEmuCpuContextView(simplecustviewer_t):
 
                 if reg_label in self.lastContext:
                     if self.lastContext[reg_label] != currentValue:
-                        line += COLSTR(str(value_format % currentValue), SCOLOR_VOIDOP)
+                        line += COLSTR(str(value_format %
+                                           currentValue), SCOLOR_VOIDOP)
                     else:
-                        line += COLSTR(str(value_format % currentValue), SCOLOR_NUMBER)
+                        line += COLSTR(str(value_format %
+                                           currentValue), SCOLOR_NUMBER)
                 else:
-                    line += COLSTR(str(value_format % currentValue), SCOLOR_NUMBER)
+                    line += COLSTR(str(value_format %
+                                       currentValue), SCOLOR_NUMBER)
 
                 self.lastContext[reg_label] = currentValue
 
@@ -694,10 +712,11 @@ Specify start address and size of new memory range.
 <##Address\::{mem_addr}> <##Size\::{mem_size}>
 <##Comment\::{mem_cmnt}>
 """, {
-        'mem_addr': Form.NumericInput(swidth=20, tp=Form.FT_HEX),
-        'mem_size': Form.NumericInput(swidth=10, tp=Form.FT_DEC),
-        'mem_cmnt': Form.StringInput(swidth=41)
+            'mem_addr': Form.NumericInput(swidth=20, tp=Form.FT_HEX),
+            'mem_size': Form.NumericInput(swidth=10, tp=Form.FT_DEC),
+            'mem_cmnt': Form.StringInput(swidth=41)
         })
+
 
 class uEmuMemoryView(simplecustviewer_t):
     def __init__(self, owner, address, size):
@@ -730,20 +749,22 @@ class uEmuMemoryView(simplecustviewer_t):
         size = len(memory)
 
         hdr_title = COLSTR("  Memory at [ ", SCOLOR_AUTOCMT)
-        hdr_title += COLSTR("0x%X: %d byte(s)" % (self.address, size), SCOLOR_DREF)
+        hdr_title += COLSTR("0x%X: %d byte(s)" %
+                            (self.address, size), SCOLOR_DREF)
         hdr_title += COLSTR(" ]", SCOLOR_AUTOCMT)
         self.AddLine(str(hdr_title))
         self.AddLine("")
-        self.AddLine(COLSTR("                0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F", SCOLOR_AUTOCMT))
+        self.AddLine(COLSTR(
+            "                0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F", SCOLOR_AUTOCMT))
 
         startAddress = self.address
         line = ""
         chars = ""
-        get_char = lambda byte: chr(byte) if 0x20 <= byte <= 0x7E else '.'
+        def get_char(byte): return chr(byte) if 0x20 <= byte <= 0x7E else '.'
 
         if size != 0:
             for x in range(size):
-                if x%16==0:
+                if x % 16 == 0:
                     line += COLSTR(" %.12X: " % startAddress, SCOLOR_AUTOCMT)
                 if len(self.lastContent) == len(memory):
                     if memory[x] != self.lastContent[x]:
@@ -756,7 +777,7 @@ class uEmuMemoryView(simplecustviewer_t):
                     line += COLSTR(str("%.2X " % memory[x]), SCOLOR_NUMBER)
                     chars += COLSTR(get_char(memory[x]), SCOLOR_NUMBER)
 
-                if (x+1)%16==0:
+                if (x+1) % 16 == 0:
                     line += "  " + chars
                     self.AddLine(line)
                     startAddress += 16
@@ -764,9 +785,10 @@ class uEmuMemoryView(simplecustviewer_t):
                     chars = ""
 
             # add padding
-            tail = 16 - size%16
+            tail = 16 - size % 16
             if tail != 0:
-                for x in range(tail): line += "   "
+                for x in range(tail):
+                    line += "   "
                 line += "  " + chars
                 self.AddLine(line)
 
@@ -777,6 +799,7 @@ class uEmuMemoryView(simplecustviewer_t):
         self.owner.memory_view_closed(self.viewid)
 
 # === uEmuStackView
+
 
 class uEmuStackView(simplecustviewer_t):
 
@@ -817,13 +840,13 @@ class uEmuStackView(simplecustviewer_t):
             line = ('  ' + value_format + ': ') % cur_addr
             try:
                 value = context.mem_read(cur_addr, reg_byte_size)
-                value, = struct.unpack('Q' if reg_bit_size == 64 else 'I', value)
+                value, = struct.unpack(
+                    'Q' if reg_bit_size == 64 else 'I', value)
                 line += value_format % value
             except Exception:
                 line += '?' * reg_byte_size * 2
 
             self.AddLine(COLSTR(line, clr))
-
 
     def OnClose(self):
         self.owner.stack_view_closed()
@@ -873,7 +896,7 @@ class uEmuControlView(PluginForm):
     def OnEmuSkip(self, code=0):
         self.owner.emu_skip()
 
-    def OnEmuReset(self,code=0):
+    def OnEmuReset(self, code=0):
         self.owner.emu_reset()
 
     def OnEmuRun(self, code=0):
@@ -890,35 +913,37 @@ class uEmuControlView(PluginForm):
 
 # === uEmuMappeduMemoryView
 
+
 class uEmuMappeduMemoryView(IDAAPI_Choose):
 
     def __init__(self, owner, memory, flags=0, width=None, height=None, embedded=False):
         IDAAPI_Choose.__init__(
             self,
             "uEmu Mapped Memory",
-            [ ["Start", 20], ["End", 20], ["Permissions", 10] ],
-            flags = flags,
-            width = width,
-            height = height,
-            embedded = embedded)
+            [["Start", 20], ["End", 20], ["Permissions", 10]],
+            flags=flags,
+            width=width,
+            height=height,
+            embedded=embedded)
         self.n = 0
         self.items = memory
         self.icon = -1
         self.selcount = 0
-        self.popup_names = [ "", "Dump To File", "Show", "" ]
+        self.popup_names = ["", "Dump To File", "Show", ""]
         self.owner = owner
 
     def OnClose(self):
         pass
 
-    def OnDeleteLine(self, n): # Save JSON
+    def OnDeleteLine(self, n):  # Save JSON
         filePath = IDAAPI_AskFile(1, "*.bin", "Dump memory")
         if filePath is not None:
             with open(filePath, 'wb') as outfile:
                 address = self.items[n][0]
                 size = self.items[n][1] - self.items[n][0] + 1
                 outfile.seek(0, 0)
-                outfile.write(self.owner.unicornEngine.get_mapped_bytes(address, size))
+                outfile.write(
+                    self.owner.unicornEngine.get_mapped_bytes(address, size))
                 outfile.close()
         return n
 
@@ -959,7 +984,7 @@ uEmu Settings
 <Trace instructions:{chk_trace}>
 <Lazy mapping:{chk_lazymapping}>{emu_group}>
 """, {
-        'emu_group': Form.ChkGroupControl(("chk_followpc", "chk_forcecode", "chk_trace", "chk_lazymapping")),
+            'emu_group': Form.ChkGroupControl(("chk_followpc", "chk_forcecode", "chk_trace", "chk_lazymapping")),
         })
 
 # === uEmuUnicornEngine
@@ -974,9 +999,10 @@ Register Value
 {reg_label}
 <##:{reg_val}>
 """, {
-        'reg_label': Form.StringLabel("Enter hex value for [ " + regName + " ]"),
-        'reg_val': Form.NumericInput(tp=Form.FT_HEX, swidth=20)
+            'reg_label': Form.StringLabel("Enter hex value for [ " + regName + " ]"),
+            'reg_val': Form.NumericInput(tp=Form.FT_HEX, swidth=20)
         })
+
 
 class uEmuRegisterValueLHDialog(Form):
     def __init__(self, regName):
@@ -988,10 +1014,11 @@ Register Value
 <##High\::{reg_valh}>
 <##Low\: :{reg_vall}>
 """, {
-        'reg_label': Form.StringLabel("Enter hex value for [ " + regName + " ]"),
-        'reg_valh': Form.NumericInput(tp=Form.FT_HEX, swidth=20),
-        'reg_vall': Form.NumericInput(tp=Form.FT_HEX, swidth=20)
+            'reg_label': Form.StringLabel("Enter hex value for [ " + regName + " ]"),
+            'reg_valh': Form.NumericInput(tp=Form.FT_HEX, swidth=20),
+            'reg_vall': Form.NumericInput(tp=Form.FT_HEX, swidth=20)
         })
+
 
 class uEmuMapBinaryFileDialog(Form):
     def __init__(self, address):
@@ -1007,13 +1034,13 @@ Map Binary File
 <##Data Size\:  :{mem_size}> {total_label}
 
 """, {
-        'file_name': Form.FileInput(swidth=50, open=True),
-        'note_label': Form.StringLabel("NOTE: Region MUST cover 0x%X" % (address)),
-        'mem_addr': Form.NumericInput(swidth=20, tp=Form.FT_HEX),
-        'mem_offset': Form.NumericInput(swidth=20, tp=Form.FT_HEX),
-        'mem_size': Form.NumericInput(swidth=20, tp=Form.FT_HEX),
-        'total_label': Form.StringLabel(""),
-        'form_change_cb': Form.FormChangeCb(self.OnFormChange)
+            'file_name': Form.FileInput(swidth=50, open=True),
+            'note_label': Form.StringLabel("NOTE: Region MUST cover 0x%X" % (address)),
+            'mem_addr': Form.NumericInput(swidth=20, tp=Form.FT_HEX),
+            'mem_offset': Form.NumericInput(swidth=20, tp=Form.FT_HEX),
+            'mem_size': Form.NumericInput(swidth=20, tp=Form.FT_HEX),
+            'total_label': Form.StringLabel(""),
+            'form_change_cb': Form.FormChangeCb(self.OnFormChange)
         })
 
     def OnFormChange(self, fid):
@@ -1022,7 +1049,8 @@ Map Binary File
             if os.path.isfile(filepath):
                 size = os.path.getsize(filepath)
                 self.SetControlValue(self.mem_size, size)
-                self.SetControlValue(self.total_label, "Total: %d (0x%X)" % (size, size))
+                self.SetControlValue(
+                    self.total_label, "Total: %d (0x%X)" % (size, size))
         return 1
 
 
@@ -1032,21 +1060,22 @@ class uEmuContextInitDialog(IDAAPI_Choose):
         IDAAPI_Choose.__init__(
             self,
             "uEmu CPU Context Edit",
-            [ ["Register", 10], ["Value", 30] ],
-            flags = flags,
-            width = width,
-            height = height,
-            embedded = embedded)
+            [["Register", 10], ["Value", 30]],
+            flags=flags,
+            width=width,
+            height=height,
+            embedded=embedded)
         self.n = 0
         self.items = regs
         self.icon = -1
         self.selcount = 0
-        self.popup_names = [ "Load CPU Context", "Save CPU Context", "Edit Register Value", "" ]
+        self.popup_names = ["Load CPU Context",
+                            "Save CPU Context", "Edit Register Value", ""]
 
     def OnClose(self):
         pass
 
-    def OnInsertLine(self, n=0): # load JSON
+    def OnInsertLine(self, n=0):  # load JSON
         filePath = IDAAPI_AskFile(0, "*.json", "Load CPU Context")
         if filePath is not None:
             with open(filePath, 'r') as infile:
@@ -1054,7 +1083,7 @@ class uEmuContextInitDialog(IDAAPI_Choose):
                 infile.close()
                 self.Refresh()
 
-    def OnDeleteLine(self, n): # Save JSON
+    def OnDeleteLine(self, n):  # Save JSON
         filePath = IDAAPI_AskFile(1, "*.json", "Save CPU Context")
         if filePath is not None:
             with open(filePath, 'w') as outfile:
@@ -1072,7 +1101,8 @@ class uEmuContextInitDialog(IDAAPI_Choose):
             regDlg.reg_vall.value = int(self.items[n][1], 0)
             ok = regDlg.Execute()
             if ok == 1:
-                newValue = (regDlg.reg_valh.value << (bits >> 1)) | regDlg.reg_vall.value
+                newValue = (regDlg.reg_valh.value << (
+                    bits >> 1)) | regDlg.reg_vall.value
                 self.items[n][1] = "0x%X" % newValue
         else:
             regDlg = uEmuRegisterValueDialog(self.items[n][0])
@@ -1085,7 +1115,7 @@ class uEmuContextInitDialog(IDAAPI_Choose):
         self.Refresh()
 
     def OnGetLine(self, n):
-        return [ self.items[n][0], self.items[n][1] ]
+        return [self.items[n][0], self.items[n][1]]
 
     def OnGetSize(self):
         n = len(self.items)
@@ -1100,31 +1130,31 @@ class uEmuUnicornEngine(object):
     mu = None
     pc = BADADDR
 
-    emuActive       = False
-    emuRunning      = False
-    emuThread       = None
+    emuActive = False
+    emuRunning = False
+    emuThread = None
 
-    kStepCount_Run  = 0
-    emuStepCount    = 1
+    kStepCount_Run = 0
+    emuStepCount = 1
 
-    fix_context     = None
-    extended        = False
+    fix_context = None
+    extended = False
 
     def __init__(self, owner):
         super(uEmuUnicornEngine, self).__init__()
         self.owner = owner
 
         uc_setup = {
-            "x64"       : [ UC_X86_REG_RIP,     UC_ARCH_X86,    UC_MODE_64                              ],
-            "x86"       : [ UC_X86_REG_EIP,     UC_ARCH_X86,    UC_MODE_32                              ],
-            "arm64be"   : [ UC_ARM64_REG_PC,    UC_ARCH_ARM64,  UC_MODE_ARM     | UC_MODE_BIG_ENDIAN    ],
-            "arm64le"   : [ UC_ARM64_REG_PC,    UC_ARCH_ARM64,  UC_MODE_ARM     | UC_MODE_LITTLE_ENDIAN ],
-            "armbe"     : [ UC_ARM_REG_PC,      UC_ARCH_ARM,    UC_MODE_ARM     | UC_MODE_BIG_ENDIAN    ],
-            "armle"     : [ UC_ARM_REG_PC,      UC_ARCH_ARM,    UC_MODE_ARM     | UC_MODE_LITTLE_ENDIAN ],
-            "mips64be"  : [ UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS64  | UC_MODE_BIG_ENDIAN    ],
-            "mips64le"  : [ UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS64  | UC_MODE_LITTLE_ENDIAN ],
-            "mipsbe"    : [ UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS32  | UC_MODE_BIG_ENDIAN    ],
-            "mipsle"    : [ UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS32  | UC_MODE_LITTLE_ENDIAN ],
+            "x64": [UC_X86_REG_RIP,     UC_ARCH_X86,    UC_MODE_64],
+            "x86": [UC_X86_REG_EIP,     UC_ARCH_X86,    UC_MODE_32],
+            "arm64be": [UC_ARM64_REG_PC,    UC_ARCH_ARM64,  UC_MODE_ARM | UC_MODE_BIG_ENDIAN],
+            "arm64le": [UC_ARM64_REG_PC,    UC_ARCH_ARM64,  UC_MODE_ARM | UC_MODE_LITTLE_ENDIAN],
+            "armbe": [UC_ARM_REG_PC,      UC_ARCH_ARM,    UC_MODE_ARM | UC_MODE_BIG_ENDIAN],
+            "armle": [UC_ARM_REG_PC,      UC_ARCH_ARM,    UC_MODE_ARM | UC_MODE_LITTLE_ENDIAN],
+            "mips64be": [UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS64 | UC_MODE_BIG_ENDIAN],
+            "mips64le": [UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS64 | UC_MODE_LITTLE_ENDIAN],
+            "mipsbe": [UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS32 | UC_MODE_BIG_ENDIAN],
+            "mipsle": [UC_MIPS_REG_PC,     UC_ARCH_MIPS,   UC_MODE_MIPS32 | UC_MODE_LITTLE_ENDIAN],
         }
         arch = UEMU_HELPERS.get_arch()
         if arch == "":
@@ -1147,10 +1177,14 @@ class uEmuUnicornEngine(object):
 
         uc_context = {}
         reg_map = UEMU_HELPERS.get_register_map(UEMU_HELPERS.get_arch())
-        reg_ext_map = UEMU_HELPERS.get_register_ext_map(UEMU_HELPERS.get_arch())
-        uc_context["cpu"] = [ [ row[1], self.mu.reg_read(row[1]) ] for row in reg_map ]
-        uc_context["cpu_ext"] = [ [ row[1], self.mu.reg_read(row[1]) ] for row in reg_ext_map ]
-        uc_context["mem"] = [ [ memStart, memEnd, memPerm, self.mu.mem_read(memStart, memEnd - memStart + 1) ] for (memStart, memEnd, memPerm) in self.mu.mem_regions() ]
+        reg_ext_map = UEMU_HELPERS.get_register_ext_map(
+            UEMU_HELPERS.get_arch())
+        uc_context["cpu"] = [
+            [row[1], self.mu.reg_read(row[1])] for row in reg_map]
+        uc_context["cpu_ext"] = [
+            [row[1], self.mu.reg_read(row[1])] for row in reg_ext_map]
+        uc_context["mem"] = [[memStart, memEnd, memPerm, self.mu.mem_read(
+            memStart, memEnd - memStart + 1)] for (memStart, memEnd, memPerm) in self.mu.mem_regions()]
 
         return uc_context
 
@@ -1205,14 +1239,16 @@ class uEmuUnicornEngine(object):
             memEnd = address + size
             memStartAligned = UEMU_HELPERS.ALIGN_PAGE_DOWN(memStart)
             memEndAligned = UEMU_HELPERS.ALIGN_PAGE_UP(memEnd)
-            uemu_log("  map [%X:%X] -> [%X:%X]" % (memStart, memEnd - 1, memStartAligned, memEndAligned - 1))
+            uemu_log("  map [%X:%X] -> [%X:%X]" % (memStart,
+                                                   memEnd - 1, memStartAligned, memEndAligned - 1))
             self.mu.mem_map(memStartAligned, memEndAligned - memStartAligned)
         except UcError as e:
             uemu_log("! <U> %s" % e)
 
     def map_empty(self, address, size):
         self.map_memory(address, size)
-        self.mu.mem_write(UEMU_HELPERS.ALIGN_PAGE_DOWN(address), b"\x00" * UEMU_CONFIG.UnicornPageSize)
+        self.mu.mem_write(UEMU_HELPERS.ALIGN_PAGE_DOWN(
+            address), b"\x00" * UEMU_CONFIG.UnicornPageSize)
 
     def map_binary(self, address, size):
         binMapDlg = uEmuMapBinaryFileDialog(address)
@@ -1262,20 +1298,23 @@ class uEmuUnicornEngine(object):
             find_inited = False
         else:
             find_inited = True
-        ptr = IDAAPI_NextThat(start, end, UEMU_HELPERS.InitedCallable() if find_inited else UEMU_HELPERS.UninitedCallable())
+        ptr = IDAAPI_NextThat(start, end, UEMU_HELPERS.InitedCallable(
+        ) if find_inited else UEMU_HELPERS.UninitedCallable())
         while ptr < end:
             if not find_inited:
                 # found uninitialized
                 tmp_end = end if ptr > end else ptr
                 uemu_log("  cpy [%X:%X]" % (start, tmp_end - 1))
-                self.mu.mem_write(start, IDAAPI_GetBytes(start, tmp_end - start))
+                self.mu.mem_write(
+                    start, IDAAPI_GetBytes(start, tmp_end - start))
             else:
                 # found initialized
                 uemu_log("  skp [%X:%X]" % (start, ptr - 1))
                 start = ptr
 
             find_inited = not find_inited
-            ptr = IDAAPI_NextThat(ptr, end, UEMU_HELPERS.InitedCallable() if find_inited else UEMU_HELPERS.UninitedCallable())
+            ptr = IDAAPI_NextThat(ptr, end, UEMU_HELPERS.InitedCallable(
+            ) if find_inited else UEMU_HELPERS.UninitedCallable())
         # process tail if any
         if not find_inited:
             tmp_end = end if ptr > end else ptr
@@ -1318,7 +1357,7 @@ class uEmuUnicornEngine(object):
                 self.copy_inited_data(segStart, segEnd)
 
     def get_mapped_memory(self):
-        return [ [ memStart, memEnd, memPerm ] for (memStart, memEnd, memPerm) in self.mu.mem_regions() ]
+        return [[memStart, memEnd, memPerm] for (memStart, memEnd, memPerm) in self.mu.mem_regions()]
 
     def get_mapped_bytes(self, address, size):
         return self.mu.mem_read(address, size)
@@ -1330,7 +1369,8 @@ class uEmuUnicornEngine(object):
 
         bytes = IDAAPI_GetBytes(self.pc, IDAAPI_NextHead(self.pc) - self.pc)
         bytes_hex = UEMU_HELPERS.bytes_to_str(bytes)
-        uemu_log("* TRACE<I> 0x%X | %-16s | %s" % (self.pc, bytes_hex, IDAAPI_GetDisasm(self.pc, 0)))
+        uemu_log("* TRACE<I> 0x%X | %-16s | %s" %
+                 (self.pc, bytes_hex, IDAAPI_GetDisasm(self.pc, 0)))
 
     def hook_mem_access(self, uc, access, address, size, value, user_data):
         def bpt_sync_check():
@@ -1341,8 +1381,10 @@ class uEmuUnicornEngine(object):
             self.fix_context = self.mu.context_save()
             # ^^^
             uc.emu_stop()
+
             def result_handler():
-                uemu_log("Memory breakpoint [0x%X] reached from 0x%X : %s" % (address, self.pc, UEMU_HELPERS.trim_spaces(IDAAPI_GetDisasm(self.pc, 0))))
+                uemu_log("Memory breakpoint [0x%X] reached from 0x%X : %s" % (
+                    address, self.pc, UEMU_HELPERS.trim_spaces(IDAAPI_GetDisasm(self.pc, 0))))
 
                 IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_PC)
                 self.owner.update_context(self.pc, self.mu)
@@ -1357,7 +1399,8 @@ class uEmuUnicornEngine(object):
 
     def hook_mem_invalid(self, uc, access, address, size, value, user_data):
         def result_handler():
-            uemu_log("! <M> Missing memory at 0x%x, data size = %u, data value = 0x%x" %(address, size, value))
+            uemu_log("! <M> Missing memory at 0x%x, data size = %u, data value = 0x%x" % (
+                address, size, value))
 
             if self.owner.lazy_mapping() and IDAAPI_IsLoaded(address):
                 page_start = UEMU_HELPERS.ALIGN_PAGE_DOWN(address)
@@ -1367,7 +1410,8 @@ class uEmuUnicornEngine(object):
                 return True
 
             while True:
-                ok = IDAAPI_AskYN(1, "Memory [%X] is not mapped!\nDo you want to map it?\n   YES - Load Binary\n   NO - Fill page with zeroes\n   Cancel - Stop Emulation" % (address))
+                ok = IDAAPI_AskYN(
+                    1, "Memory [%X] is not mapped!\nDo you want to map it?\n   YES - Load Binary\n   NO - Fill page with zeroes\n   Cancel - Stop Emulation" % (address))
                 if ok == 0:
                     self.map_empty(address, size)
                     break
@@ -1405,11 +1449,14 @@ class uEmuUnicornEngine(object):
                 uemu_log("FP/SIMD enabled")
 
         reg_map = UEMU_HELPERS.get_register_map(UEMU_HELPERS.get_arch())
-        regs = [ [ row[0], "0x0", UEMU_HELPERS.get_register_bits(UEMU_HELPERS.get_arch()), False ] for row in reg_map ]
+        regs = [[row[0], "0x0", UEMU_HELPERS.get_register_bits(
+            UEMU_HELPERS.get_arch()), False] for row in reg_map]
         regs_len = len(regs)
         if self.extended:
-            reg_ext_map = UEMU_HELPERS.get_register_ext_map(UEMU_HELPERS.get_arch())
-            regs = regs + [ [ row[0], "0x0", UEMU_HELPERS.get_register_ext_bits(UEMU_HELPERS.get_arch()), True ] for row in reg_ext_map ]
+            reg_ext_map = UEMU_HELPERS.get_register_ext_map(
+                UEMU_HELPERS.get_arch())
+            regs = regs + [[row[0], "0x0", UEMU_HELPERS.get_register_ext_bits(
+                UEMU_HELPERS.get_arch()), True] for row in reg_ext_map]
 
         if self.owner.ext_hooks.init_context is not None:
             if self.owner.ext_hooks.init_context():
@@ -1420,7 +1467,8 @@ class uEmuUnicornEngine(object):
         if ok:
             for idx, val in enumerate(cpuContext.items[0:regs_len-1]):
                 self.mu.reg_write(reg_map[idx][1], int(val[1], 0))
-            self.mu.reg_write(self.uc_reg_pc, pc)
+            # restoring the PC register, why?
+            # self.mu.reg_write(self.uc_reg_pc, pc)
             if self.extended:
                 for idx, val in enumerate(cpuContext.items[regs_len:]):
                     self.mu.reg_write(reg_ext_map[idx][1], int(val[1], 0))
@@ -1430,11 +1478,14 @@ class uEmuUnicornEngine(object):
 
     def set_cpu_context(self):
         reg_map = UEMU_HELPERS.get_register_map(UEMU_HELPERS.get_arch())
-        regs = [ [ row[0], "0x%X" % self.mu.reg_read(row[1]), UEMU_HELPERS.get_register_bits(UEMU_HELPERS.get_arch()), False ] for row in reg_map ]
+        regs = [[row[0], "0x%X" % self.mu.reg_read(row[1]), UEMU_HELPERS.get_register_bits(
+            UEMU_HELPERS.get_arch()), False] for row in reg_map]
         regs_len = len(regs)
         if self.extended:
-            reg_ext_map = UEMU_HELPERS.get_register_ext_map(UEMU_HELPERS.get_arch())
-            regs = regs + [ [ row[0], "0x%X" % self.mu.reg_read(row[1]), UEMU_HELPERS.get_register_ext_bits(UEMU_HELPERS.get_arch()), True ] for row in reg_ext_map ]
+            reg_ext_map = UEMU_HELPERS.get_register_ext_map(
+                UEMU_HELPERS.get_arch())
+            regs = regs + [[row[0], "0x%X" % self.mu.reg_read(row[1]), UEMU_HELPERS.get_register_ext_bits(
+                UEMU_HELPERS.get_arch()), True] for row in reg_ext_map]
 
         cpuContext = uEmuContextInitDialog(regs)
         ok = cpuContext.show()
@@ -1450,8 +1501,10 @@ class uEmuUnicornEngine(object):
 
     def run_from(self, address):
         self.mu = Uc(self.uc_arch, self.uc_mode)
-        self.mu.hook_add(UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED | UC_HOOK_MEM_FETCH_UNMAPPED, self.hook_mem_invalid)
-        self.mu.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE, self.hook_mem_access)
+        self.mu.hook_add(UC_HOOK_MEM_READ_UNMAPPED | UC_HOOK_MEM_WRITE_UNMAPPED |
+                         UC_HOOK_MEM_FETCH_UNMAPPED, self.hook_mem_invalid)
+        self.mu.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE,
+                         self.hook_mem_access)
         self.pc = address
 
         try:
@@ -1476,7 +1529,8 @@ class uEmuUnicornEngine(object):
                     uemu_log("* seg [%X:%X]" % (segStart, segEnd))
                     if lastAddress != BADADDR and lastAddress > segStart:
                         if lastAddress < segEnd:
-                            self.map_memory(lastAddress, endAligned - lastAddress)
+                            self.map_memory(
+                                lastAddress, endAligned - lastAddress)
                     else:
                         self.map_memory(segStart, endAligned - segStart)
 
@@ -1501,7 +1555,8 @@ class uEmuUnicornEngine(object):
                 emu_skip = self.owner.ext_hooks.emu_step(self.pc)
 
             if emu_skip == False:
-                self.mu.emu_start(self.pc | 1 if UEMU_HELPERS.is_thumb_ea(self.pc) else self.pc, -1, count=1)
+                self.mu.emu_start(self.pc | 1 if UEMU_HELPERS.is_thumb_ea(
+                    self.pc) else self.pc, -1, count=1)
 
             # vvv Workaround to fix issue when registers are still updated even if emu_stop is called
             if self.fix_context is not None:
@@ -1527,10 +1582,12 @@ class uEmuUnicornEngine(object):
                             self.step(self.emuStepCount - 1)
                         return 1
                     else:
-                        uemu_log("Breakpoint reached at 0x%X : %s" % (self.pc, UEMU_HELPERS.trim_spaces(IDAAPI_GetDisasm(self.pc, 0))))
+                        uemu_log("Breakpoint reached at 0x%X : %s" % (
+                            self.pc, UEMU_HELPERS.trim_spaces(IDAAPI_GetDisasm(self.pc, 0))))
 
                 if not self.emuRunning:
-                    uemu_log("Emulation interrupted at 0x%X : %s" % (self.pc, UEMU_HELPERS.trim_spaces(IDAAPI_GetDisasm(self.pc, 0))))
+                    uemu_log("Emulation interrupted at 0x%X : %s" % (
+                        self.pc, UEMU_HELPERS.trim_spaces(IDAAPI_GetDisasm(self.pc, 0))))
 
                 # emulation stopped - update UI
                 IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_PC)
@@ -1550,9 +1607,11 @@ class uEmuUnicornEngine(object):
 
             def result_handler():
                 if self.emuRunning:
-                    disasm = UEMU_HELPERS.trim_spaces(IDAAPI_GetDisasm(self.pc, 0))
+                    disasm = UEMU_HELPERS.trim_spaces(
+                        IDAAPI_GetDisasm(self.pc, 0))
                     if IDAAPI_AskYN(1, "Unhandled exception:\n   %s\nat:\n   0x%X: %s\n\nDo you want to skip this instruction?" % (e, self.pc, disasm)) != 1:
-                        IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_PC)
+                        IDAAPI_SetColor(self.pc, CIC_ITEM,
+                                        UEMU_CONFIG.IDAViewColor_PC)
 
                         if self.owner.follow_pc():
                             self.jump_to_pc()
@@ -1561,7 +1620,8 @@ class uEmuUnicornEngine(object):
                         return 1
 
                     self.pc = IDAAPI_NextHead(self.pc)
-                    uemu_log("! <U> Unable to emulate [ %s ] - SKIP to 0x%X" % (disasm, self.pc))
+                    uemu_log(
+                        "! <U> Unable to emulate [ %s ] - SKIP to 0x%X" % (disasm, self.pc))
 
                 if self.emuStepCount != 1:
                     if not self.is_breakpoint_reached(self.pc):
@@ -1571,10 +1631,12 @@ class uEmuUnicornEngine(object):
                             self.step(self.emuStepCount - 1)
                         return 1
                     else:
-                        uemu_log("Breakpoint reached at 0x%X : %s" % (self.pc, UEMU_HELPERS.trim_spaces(IDAAPI_GetDisasm(self.pc, 0))))
+                        uemu_log("Breakpoint reached at 0x%X : %s" % (
+                            self.pc, UEMU_HELPERS.trim_spaces(IDAAPI_GetDisasm(self.pc, 0))))
 
                 if not self.emuRunning:
-                    uemu_log("Emulation interrupted at 0x%X : %s" % (self.pc, UEMU_HELPERS.trim_spaces(IDAAPI_GetDisasm(self.pc, 0))))
+                    uemu_log("Emulation interrupted at 0x%X : %s" % (
+                        self.pc, UEMU_HELPERS.trim_spaces(IDAAPI_GetDisasm(self.pc, 0))))
 
                 # emulation stopped - update UI
                 IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_PC)
@@ -1601,7 +1663,7 @@ class uEmuUnicornEngine(object):
     def skip(self, count=1):
         IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_Reset)
         for n in range(0, count):
-            self.pc = IDAAPI_NextHead(self.pc) 
+            self.pc = IDAAPI_NextHead(self.pc)
 
         # emulation stopped - update UI
         IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_PC)
@@ -1644,10 +1706,12 @@ class uEmuUnicornEngine(object):
 
 # === uEmuPlugin
 
+
 class uEmuExtensionHooks:
     init_context = None
     trace_log = None
     emu_step = None
+
 
 class uEmuPlugin(plugin_t, UI_Hooks):
 
@@ -1668,10 +1732,10 @@ class uEmuPlugin(plugin_t, UI_Hooks):
     unicornEngine = None
 
     settings = {
-        "follow_pc"     : False,
-        "force_code"    : False,
-        "trace_inst"    : False,
-        "lazy_mapping"  : False,
+        "follow_pc": False,
+        "force_code": False,
+        "trace_inst": False,
+        "lazy_mapping": False,
     }
 
     controlView = None
@@ -1683,7 +1747,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     # --- PLUGIN LIFECYCLE
 
-    def __init__(self, name = "uEmu", hooks = uEmuExtensionHooks()):
+    def __init__(self, name="uEmu", hooks=uEmuExtensionHooks()):
         super(uEmuPlugin, self).__init__()
         self.plugin_name = name
         self.wanted_name = name
@@ -1699,13 +1763,13 @@ class uEmuPlugin(plugin_t, UI_Hooks):
     def run(self, arg):
         uemu_log("Run plugin " + self.plugin_name + " with (%d)" % arg)
 
-    def run(self, arg = 0):
+    def run(self, arg=0):
         uemu_log("Run plugin " + self.plugin_name)
         self.register_menu_actions()
         self.attach_main_menu_actions()
         self.unicornEngine = uEmuUnicornEngine(self)
 
-    def term(self): # asynchronous unload (external, UI_Hook::term)
+    def term(self):  # asynchronous unload (external, UI_Hook::term)
         self.unicornEngine = None
         self.unhook_ui_actions()
         self.detach_main_menu_actions()
@@ -1715,7 +1779,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
     def get_context_columns(self):
         return 2
 
-    def unload_plugin(self): # synchronous unload (internal, Main Menu)
+    def unload_plugin(self):  # synchronous unload (internal, Main Menu)
         if self.unicornEngine.is_active():
             self.unicornEngine.reset()
         self.close_windows()
@@ -1761,7 +1825,8 @@ class uEmuPlugin(plugin_t, UI_Hooks):
             return
         with open(filePath, 'wb') as file:
             pickle.dump(self.settings, file, pickle.HIGHEST_PROTOCOL)
-            pickle.dump(self.unicornEngine.get_context(), file, pickle.HIGHEST_PROTOCOL)
+            pickle.dump(self.unicornEngine.get_context(),
+                        file, pickle.HIGHEST_PROTOCOL)
             file.close()
             uemu_log("Project saved to %s" % filePath)
 
@@ -1775,7 +1840,8 @@ class uEmuPlugin(plugin_t, UI_Hooks):
             act_text,       # The action text.
             act_handler,    # The action handler.
             shortcut,       # Optional: the action shortcut
-            tooltip,        # Optional: the action tooltip (available in menus/toolbar)
+            # Optional: the action tooltip (available in menus/toolbar)
+            tooltip,
             icon)           # Optional: the action icon (shows when in menus/toolbars)
         register_action(new_action)
 
@@ -1783,34 +1849,57 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         [x.handler() for x in self.MENU_ITEMS if x.action == action]
 
     def register_menu_actions(self):
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":start",             self.emu_start,             "Start",                      "Start emulation",           None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":run",               self.emu_run,               "Run",                        "Run",                       None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":step",              self.emu_step,              "Step",                       "Step to next instruction",  "SHIFT+CTRL+ALT+S",     True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":stop",              self.emu_stop,              "Stop",                       "Stop emulation",            None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":reset",             self.emu_reset,             "Reset",                      "Reset emulation",           None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,            "",                           None,                        None,                   True    ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":start",             self.emu_start,
+                                                     "Start",                      "Start emulation",           None,                   True))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":run",               self.emu_run,
+                                                     "Run",                        "Run",                       None,                   True))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":step",              self.emu_step,
+                                                     "Step",                       "Step to next instruction",  "SHIFT+CTRL+ALT+S",     True))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":stop",              self.emu_stop,
+                                                     "Stop",                       "Stop emulation",            None,                   True))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":reset",             self.emu_reset,
+                                                     "Reset",                      "Reset emulation",           None,                   True))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,
+                                                     "",                           None,                        None,                   True))
         self.add_custom_menu()
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":jmp_pc",            self.jump_to_pc,            "Jump to PC",                 "Jump to PC",                "SHIFT+CTRL+ALT+J",     True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":cng_cpu",           self.change_cpu_context,    "Change CPU Context",         "Change CPU Context",        None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,            "",                           None,                        None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":ctl_view",          self.show_controls,         "Show Controls",              "Show Control Window",       None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":cpu_view",          self.show_cpu_context,      "Show CPU Context",           "Show CPU Registers",        None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":cpu_ext_view",      self.show_cpu_ext_context,  "Show CPU Extended Context",  "Show Extended Registers",   None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":stack_view",        self.show_stack_view,       "Show Stack View",            "Show Stack View",           None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":mem_view",          self.show_memory,           "Show Memory Range",          "Show Memory Range",         None,                   True    ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":mem_map",           self.show_mapped,           "Show Mapped Memory",         "Show Mapped Memory",        None,                   False   ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":fetch_segs",        self.fetch_segments,        "Fetch Segments",             "Fetch Segments",            None,                   False   ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,            "",                           None,                        None,                   False   ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":load_prj",          self.load_project,          "Load Project",               "Load Project",              None,                   False   ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":save_prj",          self.save_project,          "Save Project",               "Save Project",              None,                   False   ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":settings",          self.show_settings,         "Settings",                   "Settings",                  None,                   False   ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,            "",                           None,                        None,                   False   ))
-        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":unload",            self.unload_plugin,         "Unload Plugin",              "Unload Plugin",             None,                   False   ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":jmp_pc",            self.jump_to_pc,
+                                                     "Jump to PC",                 "Jump to PC",                "SHIFT+CTRL+ALT+J",     True))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":cng_cpu",           self.change_cpu_context,
+                                                     "Change CPU Context",         "Change CPU Context",        None,                   True))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,
+                                                     "",                           None,                        None,                   True))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":ctl_view",          self.show_controls,
+                                                     "Show Controls",              "Show Control Window",       None,                   True))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":cpu_view",          self.show_cpu_context,
+                                                     "Show CPU Context",           "Show CPU Registers",        None,                   True))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":cpu_ext_view",      self.show_cpu_ext_context,
+                                                     "Show CPU Extended Context",  "Show Extended Registers",   None,                   True))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":stack_view",        self.show_stack_view,
+                                                     "Show Stack View",            "Show Stack View",           None,                   True))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":mem_view",          self.show_memory,
+                                                     "Show Memory Range",          "Show Memory Range",         None,                   True))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":mem_map",           self.show_mapped,
+                                                     "Show Mapped Memory",         "Show Mapped Memory",        None,                   False))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":fetch_segs",        self.fetch_segments,
+                                                     "Fetch Segments",             "Fetch Segments",            None,                   False))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,
+                                                     "",                           None,                        None,                   False))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":load_prj",          self.load_project,
+                                                     "Load Project",               "Load Project",              None,                   False))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":save_prj",          self.save_project,
+                                                     "Save Project",               "Save Project",              None,                   False))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":settings",          self.show_settings,
+                                                     "Settings",                   "Settings",                  None,                   False))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,
+                                                     "",                           None,                        None,                   False))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":unload",            self.unload_plugin,
+                                                     "Unload Plugin",              "Unload Plugin",             None,                   False))
 
         for item in self.MENU_ITEMS:
             if item.action == "-":
                 continue
-            self.register_new_action(item.action, item.title, UEMU_HELPERS.IdaMenuActionHandler(self, item.action), item.shortcut, item.tooltip,  -1)
+            self.register_new_action(item.action, item.title, UEMU_HELPERS.IdaMenuActionHandler(
+                self, item.action), item.shortcut, item.tooltip,  -1)
 
     def unregister_menu_actions(self):
         for item in self.MENU_ITEMS:
@@ -1820,13 +1909,15 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
     def attach_main_menu_actions(self):
         for item in self.MENU_ITEMS:
-            attach_action_to_menu("Edit/Plugins/" + self.plugin_name + "/" + item.title, item.action, SETMENU_APP)
+            attach_action_to_menu(
+                "Edit/Plugins/" + self.plugin_name + "/" + item.title, item.action, SETMENU_APP)
 
     def detach_main_menu_actions(self):
         for item in self.MENU_ITEMS:
-            detach_action_from_menu("Edit/Plugins/" + self.plugin_name + "/" + item.title, item.action)
+            detach_action_from_menu(
+                "Edit/Plugins/" + self.plugin_name + "/" + item.title, item.action)
 
-    def add_custom_menu(self): # used by extensions
+    def add_custom_menu(self):  # used by extensions
         pass
 
     # --- POPUP MENU
@@ -1844,14 +1935,16 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         if get_widget_type(widget) == BWN_DISASM:
             for item in self.MENU_ITEMS:
                 if item.popup:
-                    attach_action_to_popup(widget, popup_handle, item.action, self.plugin_name + "/")
+                    attach_action_to_popup(
+                        widget, popup_handle, item.action, self.plugin_name + "/")
 
     # IDA 6.x
     def finish_populating_tform_popup(self, form, popup_handle):
         if get_tform_type(form) == BWN_DISASM:
             for item in self.MENU_ITEMS:
                 if item.popup:
-                    attach_action_to_popup(form, popup_handle, item.action, self.plugin_name + "/")
+                    attach_action_to_popup(
+                        form, popup_handle, item.action, self.plugin_name + "/")
 
     # --- DELEGATES
 
@@ -1991,10 +2084,20 @@ class uEmuPlugin(plugin_t, UI_Hooks):
             return
 
         self.unicornEngine.set_cpu_context()
+        # check if PC has been changed
+        newpc = self.unicornEngine.mu.reg_read(
+            self.unicornEngine.uc_reg_pc)
+        if (newpc != self.unicornEngine.pc):
+            uemu_log(f"PC has changed to:  {self.unicornEngine.pc}")
+            self.unicornEngine.pc = newpc
+            self.unicornEngine.jump_to_pc()
+        # --
         if self.cpuContextView is not None:
-            self.cpuContextView.SetContent(self.unicornEngine.pc, self.unicornEngine.mu)
+            self.cpuContextView.SetContent(
+                self.unicornEngine.pc, self.unicornEngine.mu)
         if self.cpuExtContextView is not None:
-            self.cpuExtContextView.SetContent(self.unicornEngine.pc, self.unicornEngine.mu)
+            self.cpuExtContextView.SetContent(
+                self.unicornEngine.pc, self.unicornEngine.mu)
 
     def show_controls(self):
         if self.controlView is None:
@@ -2009,7 +2112,8 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         if self.cpuContextView is None:
             self.cpuContextView = uEmuCpuContextView(self, False)
             self.cpuContextView.Create("uEmu CPU Context")
-            self.cpuContextView.SetContent(self.unicornEngine.pc, self.unicornEngine.mu)
+            self.cpuContextView.SetContent(
+                self.unicornEngine.pc, self.unicornEngine.mu)
             self.cpuContextView.Show()
             self.cpuContextView.Refresh()
 
@@ -2024,11 +2128,12 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         if self.cpuExtContextView is None:
             self.cpuExtContextView = uEmuCpuContextView(self, True)
             self.cpuExtContextView.Create("uEmu CPU Extended Context")
-            self.cpuExtContextView.SetContent(self.unicornEngine.pc, self.unicornEngine.mu)
+            self.cpuExtContextView.SetContent(
+                self.unicornEngine.pc, self.unicornEngine.mu)
             self.cpuExtContextView.Show()
             self.cpuExtContextView.Refresh()
 
-    def show_memory(self, address = 0, size = 16):
+    def show_memory(self, address=0, size=16):
         if not self.unicornEngine.is_active():
             uemu_log("Emulator is not active")
             return
@@ -2045,7 +2150,8 @@ class uEmuPlugin(plugin_t, UI_Hooks):
 
             if mem_addr not in self.memoryViews:
                 if not self.unicornEngine.is_memory_mapped(mem_addr):
-                    ok = IDAAPI_AskYN(1, "Memory [%X:%X] is not mapped!\nDo you want to map it?\n   YES - Load Binary\n   NO - Fill page with zeroes\n   Cancel - Close dialog" % (mem_addr, mem_addr + mem_size))
+                    ok = IDAAPI_AskYN(
+                        1, "Memory [%X:%X] is not mapped!\nDo you want to map it?\n   YES - Load Binary\n   NO - Fill page with zeroes\n   Cancel - Close dialog" % (mem_addr, mem_addr + mem_size))
                     if ok == 0:
                         self.unicornEngine.map_empty(mem_addr, mem_size)
                     elif ok == 1:
@@ -2054,8 +2160,10 @@ class uEmuPlugin(plugin_t, UI_Hooks):
                     else:
                         return
 
-                self.memoryViews[mem_addr] = uEmuMemoryView(self, mem_addr, mem_size)
-                self.memoryViews[mem_addr].Create("uEmu Memory [ " + mem_cmnt + " ]")
+                self.memoryViews[mem_addr] = uEmuMemoryView(
+                    self, mem_addr, mem_size)
+                self.memoryViews[mem_addr].Create(
+                    "uEmu Memory [ " + mem_cmnt + " ]")
                 self.memoryViews[mem_addr].SetContent(self.unicornEngine.mu)
             self.memoryViews[mem_addr].Show()
             self.memoryViews[mem_addr].Refresh()
@@ -2077,7 +2185,8 @@ class uEmuPlugin(plugin_t, UI_Hooks):
             uemu_log("Emulator is not active")
             return
 
-        mappeduEmuMemoryView = uEmuMappeduMemoryView(self, self.unicornEngine.get_mapped_memory())
+        mappeduEmuMemoryView = uEmuMappeduMemoryView(
+            self, self.unicornEngine.get_mapped_memory())
         mappeduEmuMemoryView.show()
 
     def fetch_segments(self):
@@ -2092,7 +2201,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         self.unicornEngine.fetch_segments()
 
     def show_settings(self):
-        kSettingsMask_FollowPC  = 0x1
+        kSettingsMask_FollowPC = 0x1
         kSettingsMask_ForceCode = 0x2
         kSettingsMask_TraceInst = 0x4
         kSettingsMask_LazyMapping = 0x8
@@ -2101,10 +2210,14 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         settingsDlg.Compile()
         settingsDlg.emu_group.value = 0
 
-        if self.settings["follow_pc"]: settingsDlg.emu_group.value = settingsDlg.emu_group.value | kSettingsMask_FollowPC
-        if self.settings["force_code"]: settingsDlg.emu_group.value = settingsDlg.emu_group.value | kSettingsMask_ForceCode
-        if self.settings["trace_inst"]: settingsDlg.emu_group.value = settingsDlg.emu_group.value | kSettingsMask_TraceInst
-        if self.settings["lazy_mapping"]: settingsDlg.emu_group.value = settingsDlg.emu_group.value | kSettingsMask_LazyMapping
+        if self.settings["follow_pc"]:
+            settingsDlg.emu_group.value = settingsDlg.emu_group.value | kSettingsMask_FollowPC
+        if self.settings["force_code"]:
+            settingsDlg.emu_group.value = settingsDlg.emu_group.value | kSettingsMask_ForceCode
+        if self.settings["trace_inst"]:
+            settingsDlg.emu_group.value = settingsDlg.emu_group.value | kSettingsMask_TraceInst
+        if self.settings["lazy_mapping"]:
+            settingsDlg.emu_group.value = settingsDlg.emu_group.value | kSettingsMask_LazyMapping
 
         ok = settingsDlg.Execute()
         if ok == 1:
@@ -2126,8 +2239,10 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         for viewid in list(self.memoryViews):
             self.memoryViews[viewid].Close()
 
+
 def PLUGIN_ENTRY():
     return uEmuPlugin()
+
 
 if UEMU_USE_AS_SCRIPT:
     if __name__ == '__main__':
