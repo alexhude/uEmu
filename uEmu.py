@@ -1401,6 +1401,7 @@ class uEmuUnicornEngine(object):
         def result_handler():
             uemu_log("! <M> Missing memory at 0x%x, data size = %u, data value = 0x%x" % (
                 address, size, value))
+            self.print_context()
 
             if self.owner.lazy_mapping() and IDAAPI_IsLoaded(address):
                 page_start = UEMU_HELPERS.ALIGN_PAGE_DOWN(address)
@@ -1498,6 +1499,13 @@ class uEmuUnicornEngine(object):
             return True
         else:
             return False
+
+    def print_context(self):
+        reg_map = UEMU_HELPERS.get_register_map(UEMU_HELPERS.get_arch())
+        regs = [[row[0], "0x%X" % self.mu.reg_read(row[1]), UEMU_HELPERS.get_register_bits(
+            UEMU_HELPERS.get_arch()), False] for row in reg_map]
+        for reg in regs:
+            print(f"{reg[0]} => {reg[1]}")
 
     def run_from(self, address):
         self.mu = Uc(self.uc_arch, self.uc_mode)
