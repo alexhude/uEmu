@@ -23,18 +23,12 @@ Supports following architectures out of the box: **x86**, **x64**, **ARM**, **AR
 
 ## Installation
 
+- Configure IDAPython via [`idapyswitch`](https://github.com/idapython/src/blob/master/README_python3.txt)
 - `brew install unicorn` to install Unicorn binaries
 - `pip install unicorn` to install Unicorn python bindings
 - Use `File / Script file...` or `ALT+F7` in IDA to load **uEmu.py**
 
 Optionally **uEmu** can be loaded automatically as IDA plugin. In this case put it into [IDA]/Plugins folder and change `USE_AS_SCRIPT` to `False` inside **uEmu.py**
-
-**Note:** on Windows you might need to add IDA Pro Qt5 path
-
-```
-import sys
-sys.path.append('D:\\Soft\\IDA Pro 7.x\\python\\3\\PyQt5')
-```
 
 ## Features
 
