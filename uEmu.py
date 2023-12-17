@@ -172,6 +172,24 @@ class UEMU_HELPERS:
             return ""
 
     @staticmethod
+    def get_pc_register(arch):
+        if arch.startswith("arm64"):
+            arch = "arm64"
+        elif arch.startswith("arm"):
+            arch = "arm"
+        elif arch.startswith("mips"):
+            arch = "mips"
+
+        registers = {
+            "x64" : ("rip", UC_X86_REG_RIP),
+            "x86" : ("eip", UC_X86_REG_EIP),
+            "arm" : ("PC", UC_ARM_REG_PC),
+            "arm64" : ("PC", UC_ARM64_REG_PC),
+            "mips" : ("pc", UC_MIPS_REG_PC),
+        }
+        return registers[arch]
+
+    @staticmethod
     def get_stack_register(arch):
         if arch.startswith("arm64"):
             arch = "arm64"
@@ -1171,6 +1189,12 @@ class uEmuUnicornEngine(object):
     def jump_to_pc(self):
         IDAAPI_Jump(self.pc)
 
+    def set_pc(self, pc):
+        IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_Reset)
+        self.pc = pc
+        self.mu.reg_write(self.uc_reg_pc, self.pc)
+        IDAAPI_SetColor(self.pc, CIC_ITEM, UEMU_CONFIG.IDAViewColor_PC)
+
     def map_memory(self, address, size):
         # - size is unsigned and must be != 0
         # - starting address must be aligned to 4KB
@@ -1416,7 +1440,11 @@ class uEmuUnicornEngine(object):
         ok = cpuContext.show()
         if ok:
             for idx, val in enumerate(cpuContext.items[0:regs_len-1]):
-                self.mu.reg_write(reg_map[idx][1], int(val[1], 0))
+                if reg_map[idx][0] == UEMU_HELPERS.get_pc_register(UEMU_HELPERS.get_arch())[0]:
+                    if self.pc != int(val[1], 0):
+                        self.set_pc(int(val[1], 0))
+                else:
+                    self.mu.reg_write(reg_map[idx][1], int(val[1], 0))
             if self.extended:
                 for idx, val in enumerate(cpuContext.items[regs_len:]):
                     self.mu.reg_write(reg_ext_map[idx][1], int(val[1], 0))
@@ -1750,6 +1778,7 @@ class uEmuPlugin(plugin_t, UI_Hooks):
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,            "",                           None,                        None,                   True    ))
         self.add_custom_menu()
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":jmp_pc",            self.jump_to_pc,            "Jump to PC",                 "Jump to PC",                "SHIFT+CTRL+ALT+J",     True    ))
+        self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":set_pc",            self.set_pc,                "Set PC",                     "Set PC",                    None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":cng_cpu",           self.change_cpu_context,    "Change CPU Context",         "Change CPU Context",        None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem("-",                                     self.do_nothing,            "",                           None,                        None,                   True    ))
         self.MENU_ITEMS.append(UEMU_HELPERS.MenuItem(self.plugin_name + ":ctl_view",          self.show_controls,         "Show Controls",              "Show Control Window",       None,                   True    ))
@@ -1920,6 +1949,17 @@ class uEmuPlugin(plugin_t, UI_Hooks):
             return
 
         self.unicornEngine.jump_to_pc()
+
+    def set_pc(self):
+        if not self.unicornEngine.is_active():
+            uemu_log("Emulator is not active")
+            return
+
+        if self.unicornEngine.is_running():
+            uemu_log("Emulator is running")
+            return
+        
+        self.unicornEngine.set_pc(IDAAPI_ScreenEA())
 
     def change_cpu_context(self):
         if not self.unicornEngine.is_active():

@@ -42,6 +42,7 @@ Optionally **uEmu** can be loaded automatically as IDA plugin. In this case put 
 - **Stop** interrupts emulation
 - **Reset** resets emulation engine and unmaps all memory regions
 - **Jump To PC** simply jumps to current PC
+- **Set PC** moves PC to cursor
 - It is possible to **Update CPU Context** manually or via JSON file (see below)
 - **Show Controls** displays window with Start/Run/Step/Stop buttons
 - **Show CPU Context** displays window with available registers
