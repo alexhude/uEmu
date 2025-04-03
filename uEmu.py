@@ -495,7 +495,7 @@ class UEMU_HELPERS:
     @staticmethod
     def is_thumb_ea(ea):
         def handler():
-            if ph.id == PLFM_ARM and not ph.flag & PR_USE64:
+            if ph.id == PLFM_ARM and not UEMU_HELPERS.inf_is_64bit():
                 if IDA_SDK_VERSION >= 700:
                     t = get_sreg(ea, "T")  # get T flag
                 else:
@@ -671,7 +671,7 @@ class uEmuCpuContextView(simplecustviewer_t):
                 if self.extended:
                     value_format = UEMU_HELPERS.get_register_ext_format(arch)
                 else:
-                    if ph.flag & PR_USE64:
+                    if UEMU_HELPERS.inf_is_64bit():
                         value_format = "0x%.16X"
                     else:
                         value_format = "0x%.8X"
