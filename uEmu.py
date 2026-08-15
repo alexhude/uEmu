@@ -1836,12 +1836,13 @@ class uEmuPlugin(plugin_t, UI_Hooks):
                 if item.popup:
                     attach_action_to_popup(widget, popup_handle, item.action, self.plugin_name + "/")
     
-    # IDA 6.x
-    def finish_populating_tform_popup(self, form, popup_handle):
-        if get_tform_type(form) == BWN_DISASM:
-            for item in self.MENU_ITEMS:
-                if item.popup:
-                    attach_action_to_popup(form, popup_handle, item.action, self.plugin_name + "/")
+    if IDA_SDK_VERSION < 700:
+        # IDA 6.x
+        def finish_populating_tform_popup(self, form, popup_handle):
+            if get_tform_type(form) == BWN_DISASM:
+                for item in self.MENU_ITEMS:
+                    if item.popup:
+                        attach_action_to_popup(form, popup_handle, item.action, self.plugin_name + "/")
 
     # --- DELEGATES
 
