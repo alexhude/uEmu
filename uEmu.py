@@ -72,9 +72,13 @@ else:
     # classes
     IDAAPI_Choose       = Choose2
 
-# PyQt
-from PyQt5 import *
-from PyQt5.QtWidgets import *
+# Qt
+try:
+    from PySide6 import QtCore, QtGui, QtWidgets # IDA 9.2+
+    from PySide6.QtWidgets import *
+except ImportError:
+    from PyQt5 import QtCore, QtGui, QtWidgets
+    from PyQt5.QtWidgets import *
 
 # Unicorn SDK
 from unicorn import *
