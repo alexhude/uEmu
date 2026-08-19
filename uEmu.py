@@ -107,7 +107,8 @@ class UEMU_HELPERS:
             self.action_type = action
 
         def activate(self, ctx):
-            if ctx.form_type == BWN_DISASM:
+            widget_type = ctx.widget_type if IDA_SDK_VERSION >= 700 else ctx.form_type
+            if widget_type == BWN_DISASM:
                 self.action_handler.handle_menu_action(self.action_type)
             return 1
 
@@ -1836,12 +1837,13 @@ class uEmuPlugin(plugin_t, UI_Hooks):
                 if item.popup:
                     attach_action_to_popup(widget, popup_handle, item.action, self.plugin_name + "/")
     
-    # IDA 6.x
-    def finish_populating_tform_popup(self, form, popup_handle):
-        if get_tform_type(form) == BWN_DISASM:
-            for item in self.MENU_ITEMS:
-                if item.popup:
-                    attach_action_to_popup(form, popup_handle, item.action, self.plugin_name + "/")
+    if IDA_SDK_VERSION < 700:
+        # IDA 6.x
+        def finish_populating_tform_popup(self, form, popup_handle):
+            if get_tform_type(form) == BWN_DISASM:
+                for item in self.MENU_ITEMS:
+                    if item.popup:
+                        attach_action_to_popup(form, popup_handle, item.action, self.plugin_name + "/")
 
     # --- DELEGATES
 
