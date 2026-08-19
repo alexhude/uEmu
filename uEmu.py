@@ -107,7 +107,8 @@ class UEMU_HELPERS:
             self.action_type = action
 
         def activate(self, ctx):
-            if ctx.form_type == BWN_DISASM:
+            widget_type = ctx.widget_type if IDA_SDK_VERSION >= 700 else ctx.form_type
+            if widget_type == BWN_DISASM:
                 self.action_handler.handle_menu_action(self.action_type)
             return 1
 
