@@ -1169,7 +1169,7 @@ class uEmuUnicornEngine(object):
                 memData = mem[3]
                 uemu_log("  map [%X:%X]" % (memStart, memEnd))
                 self.mu.mem_map(memStart, memEnd - memStart + 1, memPerm)
-                self.mu.mem_write(memStart, str(memData))
+                self.mu.mem_write(memStart, bytes(memData))
             except UcError as e:
                 uemu_log("! <U> %s" % e)
 
